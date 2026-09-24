@@ -6,11 +6,13 @@ Wrap up this session:
 
 1. **Decisions:** list every choice made in this session (by me or by you). For any without an ADR, create one as in `/decision`. Mark choices you made alone as `claude (pending review)`.
 2. **Journal:** write `../expense-tracker-spec/journal/YYYY-MM-DD-<slug>.md` (today's date, UTC) using the format in `journal/README.md`: goal, outcome, files changed, decisions (with ADR links), problems and fixes, open questions, next steps.
+   The journal is the only session history (ADR-0018), so build "What changed" from git, not memory:
+   `git -C <repo> log --since=<session start> --stat` and `git -C <repo> status --short` in both repos.
+   If earlier sessions have commits but no journal entry, add a short catch-up entry for them.
 3. **Plan sync:** if this session worked on a plan, make sure its task checkboxes, progress log, status and the `plans/README.md` index are current.
 4. **Spec sync:** update `docs/` if anything changed (API list in `04-api.md`, schema in `02-data-model.md`, roadmap status in `05-roadmap.md`).
 5. **Commit the spec repo only:**
    `git -C ../expense-tracker-spec add -A && git -C ../expense-tracker-spec commit -m "journal: <slug>"`
-   (this includes today's action logs).
 6. Give me a 5-line summary and list anything marked `pending review`.
 
 Do not push. Do not make extra code-repo commits beyond those `/plan-run` already made or I asked for.

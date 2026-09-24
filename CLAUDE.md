@@ -9,7 +9,7 @@ The spec repo is at `../expense-tracker-spec` (sibling folder).
 - Work is organised as **plans** in `plans/`. Only execute plans with status Approved or In progress.
   Continuing a plan uses the `plan-run` skill; new work uses the `plan-new` skill.
 - If the code must diverge from the spec, **stop and ask**, then record the change as a new ADR.
-- Never edit `../expense-tracker-spec/logs/`. Never rewrite an Accepted ADR — supersede it.
+- Never rewrite an Accepted ADR — supersede it.
 
 ## Recording decisions (required)
 Any choice about a library, schema, API shape, infrastructure, security, or UX flow that is not
