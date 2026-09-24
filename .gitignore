@@ -1,0 +1,7 @@
+# Add these lines to the code repo's .gitignore
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+samples/
+web/dist/
