@@ -8,7 +8,7 @@ Record the decision (title from `$ARGUMENTS` if given, otherwise from the conver
 2. Fill in `0000-template.md` from this conversation: context, the options actually considered, the decision, consequences.
 3. Set **Decided by** truthfully: `user`, `claude (approved by user)`, or `claude (pending review)`.
 4. If it replaces an earlier ADR, set the old one's status to `Superseded by ADR-NNNN` (change nothing else in it).
-5. Add a row to `decisions/README.md`.
+5. Add a row (with Topic) to `decisions/README.md`. In `INDEX.md`, add the number to its topic row; if it supersedes one, add `old → new` to the superseded line and remove the old number from the topic row.
 6. Update any affected file in `docs/` so the spec stays current.
    If the decision answers a question from `questions/`, set that entry's **Result** to this ADR.
 7. Show me the ADR. Do not commit — `/wrap-up` commits the spec repo.

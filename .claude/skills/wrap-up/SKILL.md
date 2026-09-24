@@ -11,8 +11,9 @@ Wrap up this session:
    If earlier sessions have commits but no journal entry, add a short catch-up entry for them.
 3. **Plan sync:** if this session worked on a plan, make sure its task checkboxes, progress log, status and the `plans/README.md` index are current.
 4. **Spec sync:** update `docs/` if anything changed (API list in `04-api.md`, schema in `02-data-model.md`, roadmap status in `05-roadmap.md`).
-5. **Commit the spec repo only:**
+5. **Index (ADR-0022):** add the journal entry to `journal/README.md` and any new questions file to `questions/README.md`; update `INDEX.md` (topic rows for new docs, ADRs or plans; the "Now" section) and **Next task** in `plans/README.md`. Run `../expense-tracker-spec/scripts/check-index.sh` and fix anything it reports.
+6. **Commit the spec repo only:**
    `git -C ../expense-tracker-spec add -A && git -C ../expense-tracker-spec commit -m "journal: <slug>"`
-6. Give me a 5-line summary and list anything marked `pending review`.
+7. Give me a 5-line summary and list anything marked `pending review`.
 
 Do not push. Do not make extra code-repo commits beyond those `/plan-run` already made or I asked for.

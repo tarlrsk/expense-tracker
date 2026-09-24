@@ -6,7 +6,8 @@ Everything runs locally for now (ADR-0020); no Supabase (ADR-0019).
 
 ## The spec is the source of truth
 The spec repo is at `../expense-tracker-spec` (sibling folder).
-- Before starting any step, read `docs/` and the relevant `decisions/`.
+- Start at `INDEX.md` (ADR-0022): find the task's topic row and read only the ADRs, doc sections,
+  plan and questions file it points to. Skip superseded ADRs and old journal entries unless asked about history.
 - Work is organised as **plans** in `plans/`. Only execute plans with status Approved or In progress.
   Continuing a plan uses the `plan-run` skill; new work uses the `plan-new` skill.
 - If the code must diverge from the spec, **stop and ask**, then record the change as a new ADR.

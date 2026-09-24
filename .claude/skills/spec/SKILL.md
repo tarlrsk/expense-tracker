@@ -4,4 +4,4 @@ description: 'Answer questions from the spec repo knowledge base with file citat
 ---
 Answer the question (from `$ARGUMENTS` or the conversation) using only `../expense-tracker-spec` (docs, plans, decisions, questions, journal), plus `git log` of both repos for exact file changes and commits.
 
-Search before answering. Cite file paths. If it is not recorded, say so plainly, and offer general advice only if clearly labelled as not a project decision. Follow superseded ADRs to the current one.
+Start at `INDEX.md` and open the files it points to; search further only if it doesn't cover the question. Follow the superseded map for history. Cite file paths. If it is not recorded, say so plainly, and offer general advice only if clearly labelled as not a project decision. Follow superseded ADRs to the current one.
