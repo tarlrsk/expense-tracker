@@ -29,6 +29,8 @@ already in an ADR must be recorded with the `decision` skill:
 - Trivial choices made without asking (see above) → `Decided by: claude (pending review)`, and mention them in the wrap-up.
 
 Finish every session or plan task with the `wrap-up` skill.
+At session start a hook runs the spec check (ADR-0023). If it reports problems, fix them first
+(e.g. a catch-up journal entry), or ask the user, before starting new work.
 
 ## Working from plain chat
 The user talks normally; you pick the right skill. Slash commands (`/decision`, `/plan-new`,
