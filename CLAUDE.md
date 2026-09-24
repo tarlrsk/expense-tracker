@@ -45,9 +45,9 @@ When unsure which applies, ask one short question rather than guessing.
 
 ## Repo layout
 ```
-api/                  Go API (cmd/api, internal/...), openapi.yaml, sqlc queries
+api/                  Go API (cmd/api, internal/...), openapi.yaml
 web/                  React + Vite + TS PWA
-db/migrations/        SQL migrations (tables, RLS, seeds); tool chosen in PLAN-0001
+db/migrations/        SQL migrations (tables, RLS, roles, triggers, seeds); no GORM AutoMigrate (ADR-0024); tool chosen in PLAN-0001
 docker-compose.yml    Postgres and Mailpit for local development
 ```
 
@@ -59,14 +59,14 @@ docker-compose.yml    Postgres and Mailpit for local development
 - **Access (ADR-0015):** signup is invite-only. `/api/admin/*` is operator-only, manages accounts,
   and never returns other users' financial data. Users can never change `is_operator`.
 - **The browser never queries tables.** Everything, including login, goes through `/api`.
-- **Auth:** owned by the Go API, invite-only, bearer tokens only, no cookies (ADR-0016, ADR-0019). API responses send `Cache-Control: private, no-store`.
+- **Auth:** owned by the Go API, invite-only for now, email + password, opaque bearer tokens only, no cookies (ADR-0016, ADR-0019, ADR-0025). API responses send `Cache-Control: private, no-store`.
 - **Secrets:** never read, print or commit `.env` files or keys. Use `.env.example` for shape.
   Nothing secret in `VITE_*` vars.
 - **Time limit:** every API request must finish within a 60 s budget, so a later deploy needs no redesign (ADR-0016, ADR-0020).
 - **AI:** only called from the API, via `ANTHROPIC_MODEL` env var; respect daily per-user limits.
 
 ## Conventions
-- Go: chi, pgx, sqlc, slog; wrap errors with context; table-driven tests; `go test ./...` and
+- Go: gin, GORM, slog (ADR-0024); handlers get only the `WithUserTx` GORM handle, never the root `*gorm.DB`; wrap errors with context; table-driven tests; `go test ./...` and
   `golangci-lint run` must pass.
 - Web: TypeScript strict, TanStack Query for server state, API client generated from `openapi.yaml`.
 - Commits: conventional commits (`feat(api): …`, `fix(web): …`), small and focused.
