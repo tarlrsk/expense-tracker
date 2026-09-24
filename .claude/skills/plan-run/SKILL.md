@@ -7,8 +7,9 @@ Execute the next task of the plan (id from `$ARGUMENTS` if given; otherwise the 
 1. Open the plan. If its status is Draft or Dropped, stop and tell me.
 2. Check its dependencies are Done; if not, stop and tell me.
 3. Pick the **first unchecked task**. Set the plan status to In progress if it was Approved.
-4. Show me a short plan for that task and wait for my go-ahead.
-5. Implement it, following `CLAUDE.md`. Run tests and linters.
+4. Show me a short plan for that task, with any unclear points as questions (options + recommendation), and wait for my go-ahead.
+5. Implement it, following `CLAUDE.md`. Run tests and linters. If something unclear comes up, stop and ask instead of guessing.
+   Record every question and answer in `questions/NNNN-<plan-slug>.md` (ADR-0021).
 6. Commit the code with a conventional commit message.
 7. Tick the task in the plan, append a progress-log line: `YYYY-MM-DD — T<n> — <commit sha> — <one-line note>`.
 8. If all tasks and acceptance criteria are done, set status to Done and update `plans/README.md`.

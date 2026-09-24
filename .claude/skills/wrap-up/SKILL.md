@@ -4,8 +4,8 @@ description: 'End-of-session wrap-up: write the journal entry, record missing de
 ---
 Wrap up this session:
 
-1. **Decisions:** list every choice made in this session (by me or by you). For any without an ADR, create one as in `/decision`. Mark choices you made alone as `claude (pending review)`.
-2. **Journal:** write `../expense-tracker-spec/journal/YYYY-MM-DD-<slug>.md` (today's date, UTC) using the format in `journal/README.md`: goal, outcome, files changed, decisions (with ADR links), problems and fixes, open questions, next steps.
+1. **Questions & decisions:** make sure every question asked this session and its answer is in `questions/` (ADR-0021). List every choice made (by me or by you); for any without an ADR, create one as in `/decision`. Mark trivial choices you made alone as `claude (pending review)`.
+2. **Journal:** write `../expense-tracker-spec/journal/YYYY-MM-DD-<slug>.md` (today's date, UTC) using the format in `journal/README.md`: goal, outcome, files changed, decisions (with ADR links), questions asked (links to `questions/` entries), problems and fixes, open questions, next steps.
    The journal is the only session history (ADR-0018), so build "What changed" from git, not memory:
    `git -C <repo> log --since=<session start> --stat` and `git -C <repo> status --short` in both repos.
    If earlier sessions have commits but no journal entry, add a short catch-up entry for them.

@@ -12,18 +12,27 @@ The spec repo is at `../expense-tracker-spec` (sibling folder).
 - If the code must diverge from the spec, **stop and ask**, then record the change as a new ADR.
 - Never rewrite an Accepted ADR — supersede it.
 
+## Ask, don't guess (ADR-0021)
+When anything is unclear while planning or implementing — a requirement, behaviour, library,
+schema, API shape, security point or UX flow — stop and ask, with options and a recommendation.
+Only trivial, easy-to-undo choices (local names, file layout inside a package, message wording)
+may be made without asking; list them as `pending review` at wrap-up.
+Record every question and answer in `../expense-tracker-spec/questions/` (`NNNN-<plan-slug>.md`
+for a plan, `general.md` otherwise; format in `questions/README.md`). Simple go-aheads are not recorded.
+
 ## Recording decisions (required)
 Any choice about a library, schema, API shape, infrastructure, security, or UX flow that is not
 already in an ADR must be recorded with the `decision` skill:
 - Decided by the user → `Decided by: user`
 - Proposed by you and approved → `Decided by: claude (approved by user)`
-- Small choices you had to make without asking → `Decided by: claude (pending review)`, and mention them in the wrap-up.
+- Trivial choices made without asking (see above) → `Decided by: claude (pending review)`, and mention them in the wrap-up.
 
 Finish every session or plan task with the `wrap-up` skill.
 
 ## Working from plain chat
 The user talks normally; you pick the right skill. Slash commands (`/decision`, `/plan-new`,
 `/plan-run`, `/wrap-up`, `/spec`) are only a manual fallback.
+- The user answers a question → record it in `questions/`; if it is a choice, also `decision`.
 - The user makes or approves a choice → `decision`, then continue the task.
 - The user describes new work → `plan-new` (check existing plans first).
 - "continue", "next task", "let's work on …" → `plan-run`.

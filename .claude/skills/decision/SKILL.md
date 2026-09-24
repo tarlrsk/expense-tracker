@@ -10,4 +10,5 @@ Record the decision (title from `$ARGUMENTS` if given, otherwise from the conver
 4. If it replaces an earlier ADR, set the old one's status to `Superseded by ADR-NNNN` (change nothing else in it).
 5. Add a row to `decisions/README.md`.
 6. Update any affected file in `docs/` so the spec stays current.
+   If the decision answers a question from `questions/`, set that entry's **Result** to this ADR.
 7. Show me the ADR. Do not commit — `/wrap-up` commits the spec repo.
