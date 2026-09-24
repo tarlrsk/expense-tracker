@@ -1,7 +1,8 @@
 # Expense Tracker — instructions for Claude Code
 
-A private, invite-only expense tracker where each user's data is fully separate: PWA frontend on Vercel, Go API on Cloud Run,
-Supabase (Auth, Postgres with RLS, Storage), Claude Haiku 4.5 for parsing and scanning.
+A private, invite-only expense tracker where each user's data is fully separate: React PWA, Go API that owns
+login and all data access, plain Postgres with RLS, Claude Haiku 4.5 for parsing and scanning.
+Everything runs locally for now (ADR-0020); no Supabase (ADR-0019).
 
 ## The spec is the source of truth
 The spec repo is at `../expense-tracker-spec` (sibling folder).
@@ -34,23 +35,22 @@ When unsure which applies, ask one short question rather than guessing.
 ```
 api/                  Go API (cmd/api, internal/...), openapi.yaml, sqlc queries
 web/                  React + Vite + TS PWA
-supabase/migrations/  SQL migrations (tables, RLS, seeds)
-.github/workflows/    api.yml, db.yml (web deploys via Vercel Git integration)
-web/vercel.json       Vercel rewrites (/api → Cloud Run, SPA fallback) and headers
+db/migrations/        SQL migrations (tables, RLS, seeds); tool chosen in PLAN-0001
+docker-compose.yml    Postgres and Mailpit for local development
 ```
 
 ## Non-negotiable rules
 - **Privacy (ADR-0014):** every user-data row has `owner_id`; users only ever see their own data.
-  Every data query runs inside `WithUserTx` so RLS applies (ADR-0008). Every endpoint needs a
+  Every data query runs inside `WithUserTx` so RLS applies (ADR-0019). Every endpoint needs a
   cross-user test. There are no groups or shared views — do not add any without a new ADR, but
   follow the "Later: groups" guardrails in `docs/05-roadmap.md` so they can be added later.
 - **Access (ADR-0015):** signup is invite-only. `/api/admin/*` is operator-only, manages accounts,
   and never returns other users' financial data. Users can never change `is_operator`.
-- **The browser never queries tables.** Supabase JS is for auth only; data goes through `/api`.
-- **Auth:** bearer tokens only, no cookies (ADR-0016). API responses send `Cache-Control: private, no-store`.
+- **The browser never queries tables.** Everything, including login, goes through `/api`.
+- **Auth:** owned by the Go API, invite-only, bearer tokens only, no cookies (ADR-0016, ADR-0019). API responses send `Cache-Control: private, no-store`.
 - **Secrets:** never read, print or commit `.env` files or keys. Use `.env.example` for shape.
-  Production secrets live in Secret Manager. Nothing secret in `VITE_*` vars.
-- **Time limit:** every API request must finish within a 60 s budget (Vercel allows 120 s to first byte; ADR-0016).
+  Nothing secret in `VITE_*` vars.
+- **Time limit:** every API request must finish within a 60 s budget, so a later deploy needs no redesign (ADR-0016, ADR-0020).
 - **AI:** only called from the API, via `ANTHROPIC_MODEL` env var; respect daily per-user limits.
 
 ## Conventions
