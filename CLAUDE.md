@@ -2,7 +2,8 @@
 
 A private, invite-only expense tracker where each user's data is fully separate: React PWA, Go API that owns
 login and all data access, plain Postgres with RLS, Claude Haiku 4.5 for parsing and scanning.
-Everything runs locally for now (ADR-0020); no Supabase (ADR-0019).
+The app runs locally for now (ADR-0020); no Supabase (ADR-0019). The development database is on Neon;
+tests use Postgres in Docker and never connect to Neon (ADR-0026).
 
 ## The spec is the source of truth
 The spec repo is at `../expense-tracker-spec` (sibling folder).
@@ -48,7 +49,7 @@ When unsure which applies, ask one short question rather than guessing.
 api/                  Go API (cmd/api, internal/...), openapi.yaml
 web/                  React + Vite + TS PWA
 db/migrations/        SQL migrations (tables, RLS, roles, triggers, seeds); no GORM AutoMigrate (ADR-0024); tool chosen in PLAN-0001
-docker-compose.yml    Postgres and Mailpit for local development
+docker-compose.yml    Postgres for tests and Mailpit (ADR-0026)
 ```
 
 ## Non-negotiable rules
