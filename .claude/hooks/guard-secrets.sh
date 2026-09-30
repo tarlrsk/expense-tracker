@@ -8,8 +8,12 @@ TOOL="$(printf '%s' "$INPUT" | jq -r '.tool_name // ""')"
 PATH_ARG="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .tool_input.path // ""')"
 CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // ""')"
 
-SECRET_FILE='(^|/)\.env(\.local|\.production|\.development)?$|service-account[^/]*\.json$|\.pem$|(^|/)[^/]*\.key$'
-SECRET_CMD='(^|[[:space:]/="])\.env(\.local|\.production|\.development)?([[:space:];|&)"]|$)|gcloud secrets versions access|(^|[;&|][[:space:]]*)(printenv|env)[[:space:]]*($|[;&|])'
+SECRET_FILE='(^|/)\.env(\.[^/]*)?$|service-account[^/]*\.json$|\.pem$|(^|/)[^/]*\.key$'
+SECRET_CMD='(^|[[:space:]/="])\.env(\.[A-Za-z0-9_-]+)?([[:space:];|&)"]|$)|gcloud secrets versions access|(^|[;&|][[:space:]]*)(printenv|env)[[:space:]]*($|[;&|])'
+
+# .env.example holds only placeholders, so it is allowed; every other .env* name is blocked.
+CMD="$(printf '%s' "$CMD" | sed 's/\.env\.example//g')"
+case "$PATH_ARG" in .env.example|*/.env.example) PATH_ARG="" ;; esac
 
 if [ -n "$PATH_ARG" ] && printf '%s' "$PATH_ARG" | grep -Eq "$SECRET_FILE"; then
   echo "Blocked by guard-secrets: '$PATH_ARG' may contain secrets. Use .env.example, or ask the user to check it." >&2
