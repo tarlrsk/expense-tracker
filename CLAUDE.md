@@ -46,15 +46,16 @@ When unsure which applies, ask one short question rather than guessing.
 
 ## Repo layout
 ```
-api/                  Go API (cmd/api, internal/...), openapi.yaml
-web/                  React + Vite + TS PWA
-db/migrations/        SQL migrations (tables, RLS, roles, triggers, seeds); no GORM AutoMigrate (ADR-0024); tool chosen in PLAN-0001
+api/                  Go API (cmd/api; internal/bff/<area>; internal/<module>/{service,port,domain}; internal/external/<service>; internal/db; ADR-0032); no OpenAPI file (ADR-0031)
+web/                  React + Vite + TS PWA (TanStack Router, Tailwind + shadcn/ui)
+db/migrations/        SQL migrations (tables, RLS, roles, triggers, seeds); no GORM AutoMigrate (ADR-0024); applied with goose (ADR-0027)
 docker-compose.yml    Postgres for tests and Mailpit (ADR-0026)
 ```
 
 ## Non-negotiable rules
 - **Privacy (ADR-0014):** every user-data row has `owner_id`; users only ever see their own data.
-  Every data query runs inside `WithUserTx` so RLS applies (ADR-0019). Every endpoint needs a
+  Every data query runs inside `WithUserTx` so RLS applies (ADR-0019). Only the `auth` and `admin`
+  modules may use `WithAuthTx` (role `app_auth`, account tables only, ADR-0034). Every endpoint needs a
   cross-user test. There are no groups or shared views — do not add any without a new ADR, but
   follow the "Later: groups" guardrails in `docs/05-roadmap.md` so they can be added later.
 - **Access (ADR-0019, ADR-0025):** signup is invite-only. `/api/admin/*` is operator-only, manages accounts,
@@ -67,9 +68,9 @@ docker-compose.yml    Postgres for tests and Mailpit (ADR-0026)
 - **AI:** only called from the API, via `ANTHROPIC_MODEL` env var; respect daily per-user limits.
 
 ## Conventions
-- Go: gin, GORM, slog (ADR-0024); handlers get only the `WithUserTx` GORM handle, never the root `*gorm.DB`; wrap errors with context; table-driven tests; `go test ./...` and
+- Go: gin, GORM, slog (ADR-0024); handlers get only the `WithUserTx` GORM handle, never the root `*gorm.DB`; HTTP lives in `internal/bff` (no business rules there); each module has `service/` (`interface.go` + one file per use case), `port/` (`port.go` + `adaptor_pg.go`) and `domain/`; imports go bff → service → port; every method takes `context.Context` (ADR-0032); wrap errors with context; table-driven tests; `go test ./...` and
   `golangci-lint run` must pass.
-- Web: TypeScript strict, TanStack Query for server state, API client generated from `openapi.yaml`.
+- Web: TypeScript strict, TanStack Query for server state, TanStack Router (ADR-0030), Tailwind + shadcn/ui (ADR-0029); hand-written typed API client kept in one folder, in step with `docs/04-api.md` (ADR-0031).
 - Commits: conventional commits (`feat(api): …`, `fix(web): …`), small and focused.
 - One plan task per session: plan the task, implement, test, commit, tick it, wrap up.
 
