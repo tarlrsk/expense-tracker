@@ -57,7 +57,7 @@ docker-compose.yml    Postgres for tests and Mailpit (ADR-0026)
   Every data query runs inside `WithUserTx` so RLS applies (ADR-0019). Every endpoint needs a
   cross-user test. There are no groups or shared views — do not add any without a new ADR, but
   follow the "Later: groups" guardrails in `docs/05-roadmap.md` so they can be added later.
-- **Access (ADR-0015):** signup is invite-only. `/api/admin/*` is operator-only, manages accounts,
+- **Access (ADR-0019, ADR-0025):** signup is invite-only. `/api/admin/*` is operator-only, manages accounts,
   and never returns other users' financial data. Users can never change `is_operator`.
 - **The browser never queries tables.** Everything, including login, goes through `/api`.
 - **Auth:** owned by the Go API, invite-only for now, email + password, opaque bearer tokens only, no cookies (ADR-0016, ADR-0019, ADR-0025). API responses send `Cache-Control: private, no-store`.
