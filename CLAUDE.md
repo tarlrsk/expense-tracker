@@ -46,7 +46,7 @@ When unsure which applies, ask one short question rather than guessing.
 
 ## Repo layout
 ```
-api/                  Go API (cmd/api; internal/bff/<area>; internal/<module>/{service,port,domain}; internal/external/<service>; internal/db; ADR-0032); no OpenAPI file (ADR-0031)
+api/                  Go API (cmd/api; internal/handler; internal/registry/<module>/<use case>.go; internal/<module>/{orchestrator,processor,port}/<use case>; internal/<module>/domain; internal/external; internal/db; ADR-0032); no OpenAPI file (ADR-0031)
 web/                  React + Vite + TS PWA (TanStack Router, Tailwind + shadcn/ui)
 db/migrations/        SQL migrations (tables, RLS, roles, triggers, seeds); no GORM AutoMigrate (ADR-0024); applied with goose (ADR-0027)
 docker-compose.yml    Postgres for tests and Mailpit (ADR-0026)
@@ -54,8 +54,8 @@ docker-compose.yml    Postgres for tests and Mailpit (ADR-0026)
 
 ## Non-negotiable rules
 - **Privacy (ADR-0014):** every user-data row has `owner_id`; users only ever see their own data.
-  Every data query runs inside `WithUserTx` so RLS applies (ADR-0019). Only the `auth` and `admin`
-  modules may use `WithAuthTx` (role `app_auth`, account tables only, ADR-0034). Every endpoint needs a
+  Every data query runs inside `WithUserTx` so RLS applies (ADR-0019). Only the `account`
+  module may use `WithAuthTx` (role `app_auth`, account tables only, ADR-0034). Every endpoint needs a
   cross-user test. There are no groups or shared views — do not add any without a new ADR, but
   follow the "Later: groups" guardrails in `docs/05-roadmap.md` so they can be added later.
 - **Access (ADR-0019, ADR-0025):** signup is invite-only. `/api/admin/*` is operator-only, manages accounts,
@@ -68,7 +68,7 @@ docker-compose.yml    Postgres for tests and Mailpit (ADR-0026)
 - **AI:** only called from the API, via `ANTHROPIC_MODEL` env var; respect daily per-user limits.
 
 ## Conventions
-- Go: gin, GORM, slog (ADR-0024); handlers get only the `WithUserTx` GORM handle, never the root `*gorm.DB`; HTTP lives in `internal/bff` (no business rules there); each module has `service/` (`interface.go` + one file per use case), `port/` (`port.go` + `adaptor_pg.go`) and `domain/`; imports go bff → service → port; every method takes `context.Context` (ADR-0032); wrap errors with context; table-driven tests; `go test ./...` and
+- Go: gin, GORM, slog (ADR-0024); only `internal/db` holds the root `*gorm.DB`; database adaptors take their connection from the context inside `WithUserTx` / `WithAuthTx` and fail without one; processors and orchestrators import `internal/tx`, never `internal/db`; no outside call (email, AI) inside a transaction; code is grouped by module; inside a module the layers are orchestrator (optional) → processor → port, one folder per use case, each with an interface file and an implementation file (`interface.go` + `processor.go`, `port.go` + `adaptor_pg.go`); a processor never calls another processor (an orchestrator combines them); modules depend only on earlier modules; only adaptor files import GORM; every method takes `context.Context` (ADR-0032); wrap errors with context; table-driven tests; `go test ./...` and
   `golangci-lint run` must pass.
 - Web: TypeScript strict, TanStack Query for server state, TanStack Router (ADR-0030), Tailwind + shadcn/ui (ADR-0029); hand-written typed API client kept in one folder, in step with `docs/04-api.md` (ADR-0031).
 - Commits: conventional commits (`feat(api): …`, `fix(web): …`), small and focused.
