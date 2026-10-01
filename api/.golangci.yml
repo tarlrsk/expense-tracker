@@ -1,0 +1,47 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - depguard
+    - errorlint
+    - gosec
+    - misspell
+    - noctx
+    - sloglint
+    - unconvert
+  settings:
+    depguard:
+      # Import rules of ADR-0032.
+      rules:
+        gorm-only-in-db-and-pg-adaptors:
+          list-mode: lax
+          files:
+            - $all
+            - "!**/internal/db/**"
+            - "!**/adaptor_pg.go"
+            - "!**/adaptor_pg_test.go"
+          deny:
+            - pkg: gorm.io/
+              desc: GORM is allowed only in internal/db and adaptor_pg.go files (ADR-0032)
+        gin-only-in-http-layers:
+          list-mode: lax
+          files:
+            - $all
+            - "!**/internal/handler/**"
+            - "!**/internal/registry/**"
+            - "!**/internal/app/**"
+            - "!**/internal/middleware/**"
+          deny:
+            - pkg: github.com/gin-gonic/gin
+              desc: gin is allowed only in handler, registry, app and middleware (ADR-0032)
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/tarlrsk/expense-tracker/api

@@ -1,0 +1,29 @@
+name: expense-tracker
+
+services:
+  # Tests only (ADR-0026, ADR-0033): disposable, data lives in memory and is lost on stop.
+  # Never put development data here; development uses the Neon database.
+  postgres-test:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: expense_test
+    ports:
+      - "127.0.0.1:5433:5432"
+    tmpfs:
+      # The Postgres 18 image keeps its data under /var/lib/postgresql.
+      - /var/lib/postgresql
+    healthcheck:
+      # TCP check: the init-time server listens on the socket only, so this waits for the real one.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U postgres -d expense_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Catches outgoing email locally: SMTP on 1025, web UI on http://127.0.0.1:8025.
+  mailpit:
+    image: axllent/mailpit:v1.31.3
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
