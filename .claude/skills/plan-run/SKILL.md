@@ -10,7 +10,7 @@ Execute the next task of the plan (id from `$ARGUMENTS` if given; otherwise the 
 2. Check its dependencies are Done; if not, stop and tell me.
 3. Pick the **first unchecked task**. Set the plan status to In progress if it was Approved.
 4. Show me a short plan for that task, with any unclear points as questions (options + recommendation), and wait for my go-ahead.
-5. Implement it, following `CLAUDE.md`. Run tests and linters. If something unclear comes up, stop and ask instead of guessing.
+5. Implement it, following `CLAUDE.md`. If this session runs on the most expensive model, hand the code to the `implementer` subagent with a written brief and review what it returns (ADR-0044). Run tests and linters. If something unclear comes up, stop and ask instead of guessing.
    Record every question and answer in `questions/NNNN-<plan-slug>.md` (ADR-0021).
 6. Commit the code with a conventional commit message.
 7. Tick the task in the plan, update its **Next task** in `plans/README.md`, append a progress-log line: `YYYY-MM-DD — T<n> — <commit sha> — <one-line note>`.

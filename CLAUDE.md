@@ -33,6 +33,13 @@ Finish every session or plan task with the `wrap-up` skill.
 At session start a hook runs the spec check (ADR-0023). If it reports problems, fix them first
 (e.g. a catch-up journal entry), or ask the user, before starting new work.
 
+## Which model writes code (ADR-0044)
+If this session runs on Fable (or whichever model is the most expensive available), do not write
+application code yourself: plan the task, ask the questions, then hand a written brief to the
+`implementer` subagent (`.claude/agents/implementer.md`, runs on Opus). Afterwards review its diff,
+run the tests and linters yourself, commit, and update the spec. Small edits (a few lines, a doc
+fix, a review correction) you may make directly. On Opus or a cheaper model, implement directly.
+
 ## Working from plain chat
 The user talks normally; you pick the right skill. Slash commands (`/decision`, `/plan-new`,
 `/plan-run`, `/wrap-up`, `/spec`) are only a manual fallback.
