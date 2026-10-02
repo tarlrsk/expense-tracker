@@ -63,7 +63,7 @@ docker-compose.yml    Postgres for tests and Mailpit (ADR-0026)
 
 ## Non-negotiable rules
 - **Privacy (ADR-0014):** every user-data row has `owner_id`; users only ever see their own data.
-  Every data query runs inside `WithUserTx` so RLS applies (ADR-0019). Only the `account`
+  Every data query runs inside `WithUserTx` so RLS applies (ADR-0019). The API logs in as `app_login`, which has no rights of its own; the owner role (`MIGRATION_DATABASE_URL`) is used only by `make migrate` (ADR-0062). Only the `account`
   module may use `WithAuthTx` (role `app_auth`, account tables only, ADR-0034). Every endpoint needs a
   cross-user test. There are no groups or shared views — do not add any without a new ADR, but
   follow the "Later: groups" guardrails in `docs/05-roadmap.md` so they can be added later.
