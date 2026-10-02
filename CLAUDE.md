@@ -57,7 +57,7 @@ When unsure which applies, ask one short question rather than guessing.
 ```
 api/                  Go API (cmd/api; cmd/migrate (ADR-0057); internal/handler; internal/registry/<module>/<use case>.go; internal/<module>/{orchestrator,processor,port}/<use case>; internal/<module>/domain; internal/external; internal/db; ADR-0032); no OpenAPI file (ADR-0031)
 web/                  React + Vite + TS PWA (TanStack Router, Tailwind + shadcn/ui)
-db/migrations/        SQL migrations (tables, RLS, roles, triggers, seeds); no GORM AutoMigrate (ADR-0024); applied with goose (ADR-0027) by `make migrate`
+db/migrations/        SQL migrations (tables, RLS, roles, triggers, seeds); no GORM AutoMigrate (ADR-0024); applied with goose (ADR-0027) by `make migrate`; one topic per file, and a table's RLS, grants and triggers live in the same file as the table (ADR-0064)
 docker-compose.yml    Postgres for tests and Mailpit (ADR-0026)
 ```
 
