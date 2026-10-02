@@ -21,6 +21,8 @@ Only trivial, easy-to-undo choices (local names, file layout inside a package, m
 may be made without asking; list them as `pending review` at wrap-up.
 Record every question and answer in `../expense-tracker-spec/questions/` (`NNNN-<plan-slug>.md`
 for a plan, `general.md` otherwise; format in `questions/README.md`). Simple go-aheads are not recorded.
+In every recommendation, weigh future flexibility and scale: prefer the extensible option when it is
+cheap, say so and ask when it is not, and build nothing ahead of need (ADR-0059).
 
 ## Recording decisions (required)
 Any choice about a library, schema, API shape, infrastructure, security, or UX flow that is not
@@ -53,9 +55,9 @@ When unsure which applies, ask one short question rather than guessing.
 
 ## Repo layout
 ```
-api/                  Go API (cmd/api; internal/handler; internal/registry/<module>/<use case>.go; internal/<module>/{orchestrator,processor,port}/<use case>; internal/<module>/domain; internal/external; internal/db; ADR-0032); no OpenAPI file (ADR-0031)
+api/                  Go API (cmd/api; cmd/migrate (ADR-0057); internal/handler; internal/registry/<module>/<use case>.go; internal/<module>/{orchestrator,processor,port}/<use case>; internal/<module>/domain; internal/external; internal/db; ADR-0032); no OpenAPI file (ADR-0031)
 web/                  React + Vite + TS PWA (TanStack Router, Tailwind + shadcn/ui)
-db/migrations/        SQL migrations (tables, RLS, roles, triggers, seeds); no GORM AutoMigrate (ADR-0024); applied with goose (ADR-0027)
+db/migrations/        SQL migrations (tables, RLS, roles, triggers, seeds); no GORM AutoMigrate (ADR-0024); applied with goose (ADR-0027) by `make migrate`
 docker-compose.yml    Postgres for tests and Mailpit (ADR-0026)
 ```
 
@@ -66,7 +68,7 @@ docker-compose.yml    Postgres for tests and Mailpit (ADR-0026)
   cross-user test. There are no groups or shared views — do not add any without a new ADR, but
   follow the "Later: groups" guardrails in `docs/05-roadmap.md` so they can be added later.
 - **Access (ADR-0019, ADR-0025):** signup is invite-only. `/api/admin/*` is operator-only, manages accounts,
-  and never returns other users' financial data. Users can never change `is_operator`.
+  and never returns other users' financial data. Users can never change their `role` (ADR-0056).
 - **The browser never queries tables.** Everything, including login, goes through `/api`.
 - **Auth:** owned by the Go API, invite-only for now, email + password, opaque bearer tokens only, no cookies (ADR-0016, ADR-0019, ADR-0025). API responses send `Cache-Control: private, no-store`.
 - **Secrets:** never read, print or commit `.env` files or keys. Use `.env.example` for shape.
@@ -75,7 +77,7 @@ docker-compose.yml    Postgres for tests and Mailpit (ADR-0026)
 - **AI:** only called from the API, via `ANTHROPIC_MODEL` env var; respect daily per-user limits.
 
 ## Conventions
-- Go: gin, GORM, slog (ADR-0024); only `internal/db` holds the root `*gorm.DB`; database adaptors take their connection from the context inside `WithUserTx` / `WithAuthTx` and fail without one; processors and orchestrators import `internal/tx`, never `internal/db`; no outside call (email, AI) inside a transaction; code is grouped by module; inside a module the layers are orchestrator (optional) → processor → port, one folder per use case, each with an interface file and an implementation file (`interface.go` + `processor.go`, `port.go` + `adaptor_pg.go`); a processor never calls another processor (an orchestrator combines them); modules depend only on earlier modules; only adaptor files import GORM; every method takes `context.Context` (ADR-0032); wrap errors with context; table-driven tests; `go test ./...` and
+- Go: gin, GORM, slog (ADR-0024); only `internal/db` holds the root `*gorm.DB`; database adaptors take their connection from the context inside `WithUserTx` / `WithAuthTx` and fail without one; processors and orchestrators import `internal/tx`, never `internal/db`; no outside call (email, AI) inside a transaction; code is grouped by module; inside a module the layers are orchestrator (optional) → processor → port, one folder per use case, each with an interface file and an implementation file (`interface.go` + `processor.go`, `port.go` + `adaptor_pg.go`); a processor never calls another processor (an orchestrator combines them); modules depend only on earlier modules; only adaptor files import GORM; updates name the columns they change, never GORM `Save` (the database allows only listed columns, ADR-0058); every method takes `context.Context` (ADR-0032); wrap errors with context; table-driven tests; `go test ./...` and
   `golangci-lint run` must pass.
 - Web: TypeScript strict, TanStack Query for server state, TanStack Router (ADR-0030), Tailwind + shadcn/ui (ADR-0029) on Base UI (ADR-0054); responsive and phone-first — style the small screen by default, widen with breakpoints, check every screen at phone width (ADR-0050); hand-written typed API client kept in one folder, in step with `docs/04-api.md` (ADR-0031); npm, ESLint + Prettier, Vitest, file-based routes in `web/src/routes/` (ADR-0051); the dev server binds `127.0.0.1` only (ADR-0052); `npm run typecheck`, `lint`, `format:check` and `test` must pass.
 - Commits: conventional commits (`feat(api): …`, `fix(web): …`), small and focused.
