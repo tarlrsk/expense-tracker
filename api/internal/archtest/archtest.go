@@ -1,5 +1,6 @@
-// Package archtest checks the import rules of ADR-0032 on an internal/ tree.
-// It parses source files only (no type checking) and is used by tests.
+// Package archtest checks the import rules of ADR-0032 on an internal/ tree, and who may use the
+// auth transaction (ADR-0034). It parses source files only (no type checking) and is used by
+// tests.
 package archtest
 
 import (
@@ -27,7 +28,7 @@ var NonModules = []string{"app", "registry", "handler", "external", "tx", "db", 
 
 // Violation is one broken rule.
 type Violation struct {
-	Rule int    // rule number, 1 to 8
+	Rule int    // rule number, 1 to 10
 	File string // path relative to the internal/ directory, slash-separated
 	Msg  string
 }
@@ -112,6 +113,7 @@ func Check(modulePath, internalDir string) ([]Violation, error) {
 	}
 
 	vs = append(vs, checkConstructors(files, prefix)...)
+	vs = append(vs, checkAuthUse(files, prefix)...)
 	return vs, nil
 }
 
@@ -231,6 +233,46 @@ func checkConstructors(files []file, prefix string) []Violation {
 	}
 	return vs
 }
+
+// checkAuthUse applies rules 9 and 10 (ADR-0032, ADR-0034), on test files too:
+//   - rule 9: only packages under account/port/ (and db itself) refer to db.AuthConn;
+//   - rule 10: only account/..., app, db, tx and registry/account refer to tx.Auth or to any
+//     identifier named WithAuthTx (a call, a method or an interface method).
+//
+// Without type checking, WithAuthTx is matched by name whatever its receiver.
+func checkAuthUse(files []file, prefix string) []Violation {
+	var vs []Violation
+	for _, f := range files {
+		names := importNames(f.ast, prefix)
+		mayAuthConn := within(f.dir, "db") || within(f.dir, "account/port")
+		mayAuthTx := within(f.dir, "account") || within(f.dir, "app") || within(f.dir, "db") ||
+			within(f.dir, "tx") || within(f.dir, "registry/account")
+		ast.Inspect(f.ast, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.SelectorExpr:
+				id, ok := n.X.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				switch dir := names[id.Name]; {
+				case dir == "db" && n.Sel.Name == "AuthConn" && !mayAuthConn:
+					vs = append(vs, Violation{9, f.rel, "uses db.AuthConn; only account/port/... may"})
+				case dir == "tx" && n.Sel.Name == "Auth" && !mayAuthTx:
+					vs = append(vs, Violation{10, f.rel, "uses tx.Auth; only account, app, db, tx and registry/account may"})
+				}
+			case *ast.Ident:
+				if n.Name == "WithAuthTx" && !mayAuthTx {
+					vs = append(vs, Violation{10, f.rel, "uses WithAuthTx; only account, app, db, tx and registry/account may"})
+				}
+			}
+			return true
+		})
+	}
+	return vs
+}
+
+// within reports whether dir is pkg or a package below it.
+func within(dir, pkg string) bool { return dir == pkg || strings.HasPrefix(dir, pkg+"/") }
 
 // importNames maps each local import name of f to the internal package
 // directory it refers to. Without an alias the name is the last path element.

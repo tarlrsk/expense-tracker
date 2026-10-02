@@ -10,7 +10,9 @@
 //   - any other combination is an error and opens nothing;
 //   - an error from a joined call makes the whole transaction roll back, even when the outer
 //     function ignores it;
-//   - a context whose transaction has finished cannot open or join a transaction again.
+//   - a context whose transaction has finished cannot open or join a transaction again;
+//   - a transaction whose context is cancelled or past its deadline when fn returns is rolled
+//     back, and the error satisfies errors.Is for the context's error (ADR-0043).
 package tx
 
 import (
@@ -126,9 +128,9 @@ type Opener func(ctx context.Context, t *Txn) (context.Context, Ender, error)
 // so the real one and the fake behave the same. userID is uuid.Nil for RoleAuth.
 //
 // When ctx carries no transaction, Run calls open, runs fn with the context it returns, and
-// commits when fn returns nil and no joined call failed; otherwise it rolls back. A panic in fn
-// rolls back and keeps panicking. When ctx carries an open transaction of the same role and user,
-// fn joins it. Any other case returns an error without calling fn.
+// commits when fn returns nil, no joined call failed and ctx is not done; otherwise it rolls
+// back. A panic in fn rolls back and keeps panicking. When ctx carries an open transaction of
+// the same role and user, fn joins it. Any other case returns an error without calling fn.
 func Run(ctx context.Context, role Role, userID uuid.UUID, open Opener, fn func(ctx context.Context) error) error {
 	if t := current(ctx); t != nil {
 		switch {
@@ -165,16 +167,31 @@ func finish(ctx context.Context, t *Txn, end Ender, fn func(ctx context.Context)
 
 	fnErr := fn(ctx)
 	ended = true
+	ctxErr := ctx.Err()
 	switch {
 	case fnErr != nil:
-		return withRollback(fnErr, end.Rollback())
+		return withRollback(withContextErr(fnErr, ctxErr), end.Rollback())
 	case t.rollbackOnly.Load():
-		return withRollback(t.rolledBack(), end.Rollback())
+		return withRollback(withContextErr(t.rolledBack(), ctxErr), end.Rollback())
+	case ctxErr != nil:
+		// The real transaction may already be gone (database/sql rolls it back on cancel), so
+		// commit would only say "already committed or rolled back"; the caller needs to know why.
+		return withRollback(fmt.Errorf("transaction not committed: %w", ctxErr), end.Rollback())
 	}
 	if err := end.Commit(); err != nil {
-		return fmt.Errorf("commit: %w", err)
+		// The context may have ended between the check above and the commit.
+		return withContextErr(fmt.Errorf("commit: %w", err), ctx.Err())
 	}
 	return nil
+}
+
+// withContextErr adds ctxErr to err unless it is nil or err already carries it, so a handler can
+// tell a timeout or a cancelled request (ADR-0043) from other failures with errors.Is.
+func withContextErr(err, ctxErr error) error {
+	if ctxErr == nil || errors.Is(err, ctxErr) {
+		return err
+	}
+	return fmt.Errorf("%w (context: %w)", err, ctxErr)
 }
 
 // join runs fn inside the open transaction t. A failure or panic marks t rollback-only.
@@ -182,7 +199,7 @@ func join(ctx context.Context, t *Txn, fn func(ctx context.Context) error) error
 	done := false
 	defer func() {
 		if !done {
-			t.markRollbackOnly(errors.New("panic in a joined call"))
+			t.markRollbackOnly(errJoinedPanic)
 		}
 	}()
 	err := fn(ctx)
@@ -198,13 +215,37 @@ func (t *Txn) markRollbackOnly(cause error) {
 	t.rollbackOnly.Store(true)
 }
 
-// rolledBack is ErrRolledBack with the joined call's error as text only: the outer caller chose
-// to ignore that error, so its kind (not found, conflict ...) must not decide the response.
+// errJoinedPanic is the cause recorded when a joined call panicked.
+var errJoinedPanic = errors.New("a panic")
+
+// rolledBack is ErrRolledBack with a short description of the joined call's error, not the error
+// itself: the outer caller chose to ignore that error, so its kind (not found, conflict ...) must
+// not decide the response, and its text may quote a row value (a Postgres message such as
+// invalid input syntax for type uuid: "...", or a scan error), which must not reach a log.
 func (t *Txn) rolledBack() error {
 	if c := t.cause.Load(); c != nil {
-		return fmt.Errorf("%w: %v", ErrRolledBack, *c) //nolint:errorlint // text only, on purpose
+		return fmt.Errorf("%w (cause: %s)", ErrRolledBack, describe(*c))
 	}
 	return ErrRolledBack
+}
+
+// sqlStater is what a Postgres error offers (*pgconn.PgError has it); this package does not
+// import the driver.
+type sqlStater interface {
+	SQLState() string
+}
+
+// describe names err without its text: its SQLSTATE when it is a Postgres error, otherwise its
+// Go type.
+func describe(err error) string {
+	if errors.Is(err, errJoinedPanic) {
+		return errJoinedPanic.Error()
+	}
+	var s sqlStater
+	if errors.As(err, &s) {
+		return "SQLSTATE " + s.SQLState()
+	}
+	return fmt.Sprintf("%T", err)
 }
 
 func withRollback(err, rollbackErr error) error {

@@ -48,8 +48,13 @@ const (
 	scramIterations = 4096
 	// loginCheckTimeout bounds each test login with the new password.
 	loginCheckTimeout = 15 * time.Second
+	// loginTries test logins, loginPause apart, are made with each password form before it is
+	// judged not to work: a proxy in front of the server may need a moment to see a new password.
+	loginTries = 5
+	loginPause = time.Second
 	// changeTimeout covers up and down, including a cold Neon start and waiting for the
-	// migration lock; statusTimeout covers status and login-password.
+	// migration lock; statusTimeout covers status. login-password gets changeTimeout too: up to
+	// twice loginTries logins with pauses.
 	changeTimeout = 2 * time.Minute
 	statusTimeout = 30 * time.Second
 )
@@ -86,8 +91,8 @@ func runWith(ctx context.Context, args []string, getenv func(string) string, std
 	command := fs.Arg(0)
 	timeout := changeTimeout
 	switch command {
-	case "up", "down":
-	case "status", "login-password":
+	case "up", "down", "login-password":
+	case "status":
 		timeout = statusTimeout
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown command %q\n%s\n", command, usage)
@@ -194,8 +199,8 @@ func runWith(ctx context.Context, args []string, getenv func(string) string, std
 }
 
 // loginURLBase is the migration URL without its user and password: host, port, database and
-// query parameters stay the same for the API's connection. database fills in a missing name.
-// Errors never quote the URL.
+// query parameters stay the same for the API's connection, except the owner's own login
+// details. database fills in a missing name. Errors never quote the URL.
 func loginURLBase(dsn, database string) (*url.URL, error) {
 	u, err := url.Parse(dsn)
 	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") || u.Host == "" || u.Opaque != "" {
@@ -206,16 +211,25 @@ func loginURLBase(dsn, database string) (*url.URL, error) {
 	}
 	u.User = nil
 	u.Fragment, u.RawFragment = "", ""
-	// The owner's name or password may also be given as query parameters; they must not be
-	// copied into the API's line.
-	if q := u.Query(); q.Has("user") || q.Has("password") || q.Has("passfile") {
-		q.Del("user")
-		q.Del("password")
-		q.Del("passfile")
+	// The owner's name, password or client certificate may also be given as query parameters;
+	// they log in the owner, not app_login, and must not be copied into the API's line. The
+	// server's certificate settings (sslmode, sslrootcert) stay.
+	q := u.Query()
+	changed := false
+	for _, key := range ownerOnlyParams {
+		if q.Has(key) {
+			q.Del(key)
+			changed = true
+		}
+	}
+	if changed {
 		u.RawQuery = q.Encode()
 	}
 	return u, nil
 }
+
+// ownerOnlyParams are the connection parameters that belong to the owner's login.
+var ownerOnlyParams = []string{"user", "password", "passfile", "sslcert", "sslkey", "sslpassword"}
 
 // passwordSteps are the steps of login-password that touch the server; tests replace them.
 type passwordSteps struct {
@@ -225,18 +239,28 @@ type passwordSteps struct {
 	setPlain func(ctx context.Context, db *sql.DB, role, password string) error
 	// login opens a fresh connection with connURL and runs select 1.
 	login func(ctx context.Context, connURL string) error
+	// tries and pause: how often login is tried for one password form, and the wait between.
+	tries int
+	pause time.Duration
 }
 
-var defaultPasswordSteps = passwordSteps{setHashed: setHashedPassword, setPlain: setPlainPassword, login: tryLogin}
+var defaultPasswordSteps = passwordSteps{
+	setHashed: setHashedPassword, setPlain: setPlainPassword, login: tryLogin,
+	tries: loginTries, pause: loginPause,
+}
 
 // setLoginPassword gives role a new random password and returns the DATABASE_URL line for .env,
 // built on base, only after a fresh connection with exactly that line has logged in.
 //
 // It first sends only a SCRAM-SHA-256 verifier, so the password itself never reaches the server
-// or its logs. If the test login then fails with an authentication error (SQLSTATE class 28),
-// the server did not take the pre-hashed form (a hosted Postgres may need the plain password),
-// so the same password is set again in plain form, notice says so, and the login is tried once
-// more. Any other failure returns an error and no line. Errors never contain the password.
+// or its logs. The server may not take that form (a hosted Postgres may need the plain
+// password): when the ALTER ROLE fails for any reason but "no such role" (42704) or "not
+// allowed" (42501), or the line still does not log in after steps.tries tries with an
+// authentication error (SQLSTATE class 28), the same password is set again in plain form,
+// notice says so, and the login is tried again the same way. Any other failure returns an
+// error and no line. A line that could not be pasted into .env as written (it would contain a
+// single quote) is refused before anything changes on the server. Errors never contain the
+// password.
 func setLoginPassword(ctx context.Context, db *sql.DB, base *url.URL, role string, steps passwordSteps,
 	notice io.Writer,
 ) (string, error) {
@@ -248,32 +272,75 @@ func setLoginPassword(ctx context.Context, db *sql.DB, base *url.URL, role strin
 	u := *base
 	u.User = url.UserPassword(role, password)
 	connURL := u.String()
+	if strings.Contains(connURL, "'") {
+		return "", fmt.Errorf("the DATABASE_URL line for %s would contain a single quote (from the host, database "+
+			"or query parameters of %s), which .env cannot hold inside '...'; nothing was changed on the server; "+
+			"remove or percent-encode it (%%27), then run this again", role, envVar)
+	}
 	hide := func(err error) string {
 		return strings.ReplaceAll(strings.ReplaceAll(err.Error(), connURL, "[DATABASE_URL]"), password, "[password]")
 	}
 
-	if err := steps.setHashed(ctx, db, role, password); err != nil {
+	err := steps.setHashed(ctx, db, role, password)
+	if err == nil {
+		err = loginRetrying(ctx, connURL, steps)
+		if err == nil {
+			return "DATABASE_URL='" + connURL + "'", nil
+		}
+		if !isAuthError(err) {
+			return "", couldNotCheck(role, hide(err))
+		}
+	} else if isFatalAlterError(err) {
 		return "", alterRoleError(role, err)
 	}
-	err := steps.login(ctx, connURL)
-	if isAuthError(err) {
-		if err := steps.setPlain(ctx, db, role, password); err != nil {
-			return "", alterRoleError(role, err)
-		}
-		_, _ = fmt.Fprintln(notice, "The server did not accept a pre-hashed password, so the plain password was set "+
-			"instead, sent over the database connection (encrypted when the URL requires TLS).")
-		err = steps.login(ctx, connURL)
-		if isAuthError(err) {
-			return "", fmt.Errorf("the new password of %s does not log in, neither pre-hashed nor plain (%s); "+
-				"no DATABASE_URL line was printed and the old one no longer works; check the server's "+
-				"authentication settings, then run this again", role, hide(err))
-		}
+
+	// The pre-hashed form was refused, or does not log in: set the plain form.
+	if err := steps.setPlain(ctx, db, role, password); err != nil {
+		return "", alterRoleError(role, err)
 	}
-	if err != nil {
-		return "", fmt.Errorf("could not check that %s logs in with the new password (%s); "+
-			"no DATABASE_URL line was printed and the old one may no longer work; run this again", role, hide(err))
+	_, _ = fmt.Fprintln(notice, "The server did not accept a pre-hashed password, so the plain password was set "+
+		"instead, sent over the database connection (encrypted when the URL requires TLS).")
+	err = loginRetrying(ctx, connURL, steps)
+	switch {
+	case isAuthError(err):
+		return "", fmt.Errorf("the new password of %s does not log in, neither pre-hashed nor plain (%s); "+
+			"no DATABASE_URL line was printed and the old one no longer works; check the server's "+
+			"authentication settings, then run this again", role, hide(err))
+	case err != nil:
+		return "", couldNotCheck(role, hide(err))
 	}
 	return "DATABASE_URL='" + connURL + "'", nil
+}
+
+func couldNotCheck(role, reason string) error {
+	return fmt.Errorf("could not check that %s logs in with the new password (%s); "+
+		"no DATABASE_URL line was printed and the old one may no longer work; run this again", role, reason)
+}
+
+// loginRetrying tries steps.login up to steps.tries times, steps.pause apart, and returns nil at
+// the first success, otherwise the last error. It stops early when ctx ends.
+func loginRetrying(ctx context.Context, connURL string, steps passwordSteps) error {
+	var err error
+	for i := range max(steps.tries, 1) {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return errors.Join(err, ctx.Err())
+			case <-time.After(steps.pause):
+			}
+		}
+		if err = steps.login(ctx, connURL); err == nil {
+			return nil
+		}
+	}
+	return err
+}
+
+// isFatalAlterError reports whether a failed ALTER ROLE means the plain form would fail too:
+// the role does not exist (42704) or the owner may not change it (42501).
+func isFatalAlterError(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (pgErr.Code == "42704" || pgErr.Code == "42501")
 }
 
 // setHashedPassword sends only the SCRAM-SHA-256 verifier of password.

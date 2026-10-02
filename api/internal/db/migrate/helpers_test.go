@@ -153,6 +153,7 @@ var leftovers = []struct{ what, query string }{
 	{"app schema", "select count(*) from pg_namespace where nspname = 'app'"},
 	{"extensions", "select count(*) from pg_extension where extname <> 'plpgsql'"},
 	{"default privileges", "select count(*) from pg_default_acl"},
+	{"TEMP revoked from PUBLIC on the database", "select (not has_database_privilege('public', current_database(), 'TEMPORARY'))::int"},
 }
 
 func checkNoLeftovers(t *testing.T, db *sql.DB, when string) {

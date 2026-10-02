@@ -53,9 +53,10 @@ func Run(ctx context.Context) error {
 		}
 	}()
 
-	// database is also the auth transactor (tx.Auth). It is not in Deps: it goes only to the
-	// account module's Register, from PLAN-0002 T5 on (ADR-0032, ADR-0034).
-	engine, err := NewEngine(registry.Deps{Config: cfg, Logger: logger, UserTx: database})
+	// database is also the auth transactor (tx.Auth). It is not in Deps (newDeps puts only its
+	// user-only view there): it goes only to the account module's Register, from PLAN-0002 T5 on
+	// (ADR-0032, ADR-0034).
+	engine, err := NewEngine(newDeps(cfg, logger, database))
 	if err != nil {
 		return fmt.Errorf("build engine: %w", err)
 	}
@@ -95,6 +96,12 @@ func Run(ctx context.Context) error {
 		return fmt.Errorf("serve: %w", err)
 	}
 	return nil
+}
+
+// newDeps builds the shared dependencies. UserTx is database.UserOnly(), so no module can turn
+// it into a tx.Auth with a type assertion.
+func newDeps(cfg config.Config, logger *slog.Logger, database *db.DB) registry.Deps {
+	return registry.Deps{Config: cfg, Logger: logger, UserTx: database.UserOnly()}
 }
 
 // openDB connects to DATABASE_URL and runs the startup check. /api/healthz never uses it

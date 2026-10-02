@@ -48,17 +48,31 @@ func TestMemberships(t *testing.T) {
 	}
 }
 
-// The connecting owner (the migration role) cannot SET ROLE to app_user or app_auth through a
-// membership: only migrations use it, and they never switch (the API logs in as app_login).
+// The connecting owner (the migration role) cannot SET ROLE to, or inherit, app_user, app_auth
+// or app_login through a membership: only migrations use it, and they never switch (the API logs
+// in as app_login). TestNonSuperuserOwner covers a non-superuser owner.
 func TestOwnerMembership(t *testing.T) {
 	s := begin(t)
-	for _, role := range []string{"app_user", "app_auth"} {
+	for _, role := range []string{"app_user", "app_auth", "app_login"} {
 		t.Run(role, func(t *testing.T) {
 			if n := s.count(t, `select count(*) from pg_auth_members
 				where roleid = $1::regrole and member = current_user::regrole and (set_option or inherit_option)`, role); n != 0 {
 				t.Errorf("owner has a SET or INHERIT membership in %s", role)
 			}
 		})
+	}
+}
+
+// None of the three roles may create temporary tables in the database: migration 0001 revokes
+// TEMP from PUBLIC, which every role has on a new database.
+func TestNoTempTables(t *testing.T) {
+	s := begin(t)
+	for _, role := range []string{"app_user", "app_auth", "app_login"} {
+		var temp bool
+		s.scan(t, "select has_database_privilege($1, current_database(), 'TEMPORARY')", []any{role}, &temp)
+		if temp {
+			t.Errorf("%s may create temporary tables in the database", role)
+		}
 	}
 }
 

@@ -15,11 +15,27 @@ import (
 var (
 	_ tx.User = (*DB)(nil)
 	_ tx.Auth = (*DB)(nil)
+	_ tx.User = userOnly{}
 )
+
+// UserOnly returns d as a tx.User that is not a tx.Auth: a type assertion to tx.Auth on it
+// fails. app puts it in registry.Deps, so only the account module, which gets d itself, can
+// open auth transactions (ADR-0032, ADR-0034).
+func (d *DB) UserOnly() tx.User { return userOnly{d: d} }
+
+type userOnly struct{ d *DB }
+
+// WithUserTx implements tx.User.
+func (u userOnly) WithUserTx(ctx context.Context, userID uuid.UUID, fn func(ctx context.Context) error) error {
+	return u.d.WithUserTx(ctx, userID, fn)
+}
 
 // SQL run first in every transaction, in one round trip. set_config('role', ..., true) is
 // SET LOCAL ROLE; every setting ends with the transaction, so a connection back in the pool is
-// plain app_login again with no app.user_id.
+// plain app_login again with no app.user_id. Because the statement sets the timeout and the
+// role (and, for app_user, the user), a session value left on a pooled connection
+// (set_config(..., false) or SET without LOCAL) is overridden for the whole transaction; app_auth's
+// policies do not read app.user_id.
 const (
 	userBeginSQL = "select set_config('statement_timeout', ?, true), set_config('role', 'app_user', true), " +
 		"set_config('app.user_id', ?, true)"

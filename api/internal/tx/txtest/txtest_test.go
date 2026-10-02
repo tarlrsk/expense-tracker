@@ -3,8 +3,11 @@ package txtest_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -226,3 +229,87 @@ func TestContextMarker(t *testing.T) {
 		t.Errorf("UserID = %s, want %s", gotUser, a)
 	}
 }
+
+// A context that is cancelled or past its deadline when fn returns rolls the transaction back,
+// and the error says why with errors.Is, also when fn returned nil or its own error (ADR-0043).
+func TestFakeContextDone(t *testing.T) {
+	a := uuid.New()
+	past := func() (context.Context, context.CancelFunc) {
+		return context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	}
+	tests := []struct {
+		name  string
+		ctx   func() (context.Context, context.CancelFunc)
+		fnErr error
+		want  []error
+	}{
+		{name: "cancelled, fn returns nil", ctx: func() (context.Context, context.CancelFunc) {
+			return context.WithCancel(context.Background())
+		}, want: []error{context.Canceled}},
+		{name: "cancelled, fn returns an error", ctx: func() (context.Context, context.CancelFunc) {
+			return context.WithCancel(context.Background())
+		}, fnErr: errBoom, want: []error{context.Canceled, errBoom}},
+		{name: "deadline, fn returns nil", ctx: past, want: []error{context.DeadlineExceeded}},
+		{name: "deadline, fn returns an error", ctx: past, fnErr: errBoom, want: []error{context.DeadlineExceeded, errBoom}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := txtest.New()
+			ctx, cancel := tt.ctx()
+			defer cancel()
+			err := f.WithUserTx(ctx, a, func(context.Context) error {
+				cancel() // no-op for the deadline cases, which are already done
+				return tt.fnErr
+			})
+			for _, want := range tt.want {
+				if !errors.Is(err, want) {
+					t.Errorf("error = %v, want it to match %v", err, want)
+				}
+			}
+			if got := f.Records(); !slices.Equal(got, []txtest.Record{{Role: tx.RoleUser, UserID: a, Outcome: txtest.RolledBack}}) {
+				t.Errorf("records = %+v, want one rolled back", got)
+			}
+		})
+	}
+}
+
+// pgLikeError has an SQLSTATE like *pgconn.PgError, and a message that quotes a value.
+type pgLikeError struct{ msg string }
+
+func (e pgLikeError) Error() string    { return e.msg }
+func (e pgLikeError) SQLState() string { return "22P02" }
+
+// ErrRolledBack names the swallowed error by its SQLSTATE or its Go type, never by its text,
+// which may quote a row value.
+func TestRolledBackHasNoValue(t *testing.T) {
+	const secret = "SECRET-4711"
+	a := uuid.New()
+	for _, tt := range []struct {
+		name  string
+		inner error
+		want  string
+	}{
+		{"postgres error", pgLikeError{`invalid input syntax for type uuid: "` + secret + `"`}, "SQLSTATE 22P02"},
+		{"wrapped postgres error", fmtWrap(pgLikeError{secret}), "SQLSTATE 22P02"},
+		{"other error", fmtWrap(errors.New(`converting "` + secret + `" to a int64`)), "*fmt.wrapError"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := txtest.New()
+			err := f.WithUserTx(context.Background(), a, func(ctx context.Context) error {
+				_ = f.WithUserTx(ctx, a, func(context.Context) error { return tt.inner })
+				return nil
+			})
+			if !errors.Is(err, tx.ErrRolledBack) {
+				t.Fatalf("error = %v, want ErrRolledBack", err)
+			}
+			if strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error text %q: want %q in it and not the value", err, tt.want)
+			}
+			if errors.Is(err, tt.inner) {
+				t.Error("the swallowed error is still reachable with errors.Is")
+			}
+		})
+	}
+}
+
+func fmtWrap(err error) error { return fmt.Errorf("scan: %w", err) }

@@ -21,7 +21,17 @@ import (
 //
 // The owner no longer switches roles. The RLS and cascade checks log in as the renamed login
 // role, with a password the owner sets on it as `make db-login-password` does.
+//
+// It runs twice: with createrole_self_grant empty (the default) and set to 'set, inherit' on the
+// owner, as a host may configure it. Then Postgres gives the owner SET and INHERIT on every role
+// it creates, and 0001 must take them away again.
 func TestNonSuperuserOwner(t *testing.T) {
+	for _, selfGrant := range []string{"", "set, inherit"} {
+		t.Run("createrole_self_grant="+selfGrant, func(t *testing.T) { nonSuperuserOwner(t, selfGrant) })
+	}
+}
+
+func nonSuperuserOwner(t *testing.T, selfGrant string) {
 	shared := dbtest.DB(t)
 	cfg := dbtest.Config(t)
 	roles := newTestRoles(t)
@@ -33,14 +43,25 @@ func TestNonSuperuserOwner(t *testing.T) {
 		"create role "+ident(owner)+" login nosuperuser createrole bypassrls password '"+password+"'"); err != nil {
 		t.Fatalf("create owner role: %v", err)
 	}
+	if selfGrant != "" {
+		if _, err := shared.ExecContext(t.Context(),
+			"alter role "+ident(owner)+" set createrole_self_grant = '"+selfGrant+"'"); err != nil {
+			t.Fatalf("set createrole_self_grant: %v", err)
+		}
+	}
 	dbName := throwAwayDB(t, shared, owner)
 
 	ownerCfg := cfg.Copy()
 	ownerCfg.User, ownerCfg.Password = owner, password
 	db := connect(t, ownerCfg, dbName)
 	var isSuper bool
-	if err := db.QueryRowContext(t.Context(), "select rolsuper from pg_roles where rolname = current_user").Scan(&isSuper); err != nil || isSuper {
+	var setting string
+	if err := db.QueryRowContext(t.Context(), "select rolsuper, current_setting('createrole_self_grant') from pg_roles where rolname = current_user").
+		Scan(&isSuper, &setting); err != nil || isSuper {
 		t.Fatalf("not running as a non-superuser (super %v, err %v)", isSuper, err)
+	}
+	if setting != selfGrant {
+		t.Fatalf("createrole_self_grant = %q, want %q", setting, selfGrant)
 	}
 
 	m, err := migrate.New(db, renamedMigrations(t, roles))
@@ -51,14 +72,7 @@ func TestNonSuperuserOwner(t *testing.T) {
 		t.Fatalf("up as non-superuser owner: %v", err)
 	}
 
-	t.Run("owner cannot switch", func(t *testing.T) {
-		for _, role := range []string{roles.user, roles.auth} {
-			if n := count(t, shared, `select count(*) from pg_auth_members
-				where roleid = $1::regrole and member = $2::regrole and (set_option or inherit_option)`, role, owner); n != 0 {
-				t.Errorf("owner has a SET or INHERIT membership in %s", role)
-			}
-		}
-	})
+	t.Run("owner cannot switch", func(t *testing.T) { ownerCannotSwitch(t, shared, db, owner, roles) })
 
 	t.Run("login role memberships", func(t *testing.T) {
 		got := memberships(t, shared, roles.login)
@@ -108,6 +122,35 @@ func TestNonSuperuserOwner(t *testing.T) {
 	}
 	if n := roleCount(t, shared, roles.all()...); n != 3 {
 		t.Errorf("after second up: %d of the 3 roles exist", n)
+	}
+	t.Run("owner cannot switch after second up", func(t *testing.T) { ownerCannotSwitch(t, shared, db, owner, roles) })
+}
+
+// ownerCannotSwitch checks that the owner holds no SET or INHERIT membership in the three roles
+// and that SET ROLE to each of them is refused on the owner's own connection. Its ADMIN
+// membership (it created the roles) is expected.
+func ownerCannotSwitch(t *testing.T, shared, ownerDB *sql.DB, owner string, roles testRoles) {
+	t.Helper()
+	for _, role := range roles.all() {
+		if n := count(t, shared, `select count(*) from pg_auth_members
+			where roleid = $1::regrole and member = $2::regrole and (set_option or inherit_option)`, role, owner); n != 0 {
+			t.Errorf("owner has a SET or INHERIT membership in %s", role)
+		}
+		if n := count(t, shared, `select count(*) from pg_auth_members
+			where roleid = $1::regrole and member = $2::regrole and admin_option`, role, owner); n != 1 {
+			t.Errorf("owner has %d ADMIN memberships in %s, want the one Postgres gives the creator", n, role)
+		}
+		conn, err := ownerDB.Conn(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = conn.ExecContext(t.Context(), "set role "+ident(role))
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+			t.Errorf("owner SET ROLE %s: %v, want permission denied", role, err)
+			_, _ = conn.ExecContext(t.Context(), "reset role")
+		}
+		_ = conn.Close()
 	}
 }
 
@@ -195,24 +238,53 @@ func TestPreexistingBadRole(t *testing.T) {
 	shared := dbtest.DB(t)
 	cfg := dbtest.Config(t)
 
+	user := func(r testRoles) string { return r.user }
+	auth := func(r testRoles) string { return r.auth }
+	login := func(r testRoles) string { return r.login }
 	for _, tt := range []struct {
 		name      string
 		pick      func(testRoles) string // which role exists beforehand
 		create    string                 // its attributes
 		attribute string                 // what the error must name
+		member    string                 // when set: a foreign login role is granted the role with these options
 	}{
-		{"app_user with bypassrls", func(r testRoles) string { return r.user }, "noinherit bypassrls", "BYPASSRLS"},
-		{"app_user with login", func(r testRoles) string { return r.user }, "noinherit login", "LOGIN"},
-		{"app_login with bypassrls", func(r testRoles) string { return r.login }, "noinherit login bypassrls", "BYPASSRLS"},
-		{"app_login without login", func(r testRoles) string { return r.login }, "noinherit nologin", "NOLOGIN"},
-		{"app_login inheriting", func(r testRoles) string { return r.login }, "inherit login", "INHERIT"},
+		{name: "app_user with bypassrls", pick: user, create: "noinherit bypassrls", attribute: "BYPASSRLS"},
+		{name: "app_user with login", pick: user, create: "noinherit login", attribute: "LOGIN"},
+		{name: "app_login with bypassrls", pick: login, create: "noinherit login bypassrls", attribute: "BYPASSRLS"},
+		{name: "app_login without login", pick: login, create: "noinherit nologin", attribute: "NOLOGIN"},
+		{name: "app_login inheriting", pick: login, create: "inherit login", attribute: "INHERIT"},
+		// A foreign member of app_auth with INHERIT could read users directly; with SET only it
+		// could switch to app_auth (or app_user) whenever it likes.
+		{
+			name: "app_auth with a foreign member inheriting", pick: auth, create: "noinherit",
+			attribute: "members other than", member: "inherit true, set false",
+		},
+		{
+			name: "app_user with a foreign member that can SET", pick: user, create: "noinherit",
+			attribute: "members other than", member: "inherit false, set true",
+		},
+		{
+			name: "app_login with a member", pick: login, create: "noinherit login",
+			attribute: "members (", member: "inherit false, set true",
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			roles := newTestRoles(t)
 			bad := tt.pick(roles)
-			throwAwayRoles(t, shared, roles.all()...)
+			foreign := strings.TrimSuffix(roles.user, "_user") + "_foreign"
+			throwAwayRoles(t, shared, append(roles.all(), foreign)...)
 			if _, err := shared.ExecContext(t.Context(), "create role "+ident(bad)+" "+tt.create); err != nil {
 				t.Fatalf("create bad role: %v", err)
+			}
+			if tt.member != "" {
+				for _, q := range []string{
+					"create role " + ident(foreign) + " login noinherit",
+					"grant " + ident(bad) + " to " + ident(foreign) + " with " + tt.member,
+				} {
+					if _, err := shared.ExecContext(t.Context(), q); err != nil {
+						t.Fatalf("%s: %v", q, err)
+					}
+				}
 			}
 
 			db := connect(t, cfg, throwAwayDB(t, shared, ""))
@@ -228,6 +300,9 @@ func TestPreexistingBadRole(t *testing.T) {
 			if !errors.As(err, &pgErr) || pgErr.Code != "P0001" ||
 				!strings.Contains(pgErr.Message, bad) || !strings.Contains(pgErr.Message, tt.attribute) {
 				t.Errorf("up failed with %v; want the role check naming %s and %s", err, bad, tt.attribute)
+			}
+			if tt.member != "" && (pgErr == nil || !strings.Contains(pgErr.Message, foreign)) {
+				t.Errorf("up failed with %v; want it to name the foreign member %s", err, foreign)
 			}
 			if len(applied) != 0 {
 				t.Errorf("up reports %d applied migrations", len(applied))

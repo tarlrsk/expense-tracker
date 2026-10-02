@@ -11,6 +11,7 @@ import (
 
 	"github.com/tarlrsk/expense-tracker/api/internal/db/dbtest"
 	"github.com/tarlrsk/expense-tracker/api/internal/tx"
+	"github.com/tarlrsk/expense-tracker/api/internal/tx/txtest"
 )
 
 var errBoom = errors.New("boom")
@@ -247,6 +248,16 @@ func TestConn(t *testing.T) {
 			t.Errorf("%s: error = %v, want %v", tt.name, tt.got, tt.want)
 		}
 	}
+
+	// A transaction opened by another transactor (the txtest fake) has no connection here.
+	fake := txtest.New()
+	var inFake error
+	if err := fake.WithUserTx(t.Context(), user, func(ctx context.Context) error { inFake = userConn(ctx); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(inFake, tx.ErrNoTx) || !strings.Contains(inFake.Error(), "not opened by internal/db") {
+		t.Errorf("UserConn in a fake transaction: %v, want ErrNoTx, not opened by internal/db", inFake)
+	}
 }
 
 // The nesting rules of ADR-0032 on the real database.
@@ -424,11 +435,173 @@ func TestTimeoutAndCancel(t *testing.T) {
 		cancel()
 		return nil
 	})
-	if err == nil {
-		t.Error("WithUserTx committed after its context was cancelled")
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("WithUserTx after cancel: %v, want context.Canceled", err)
 	}
 	if got := categoryName(t, user); got != before {
 		t.Errorf("category name = %q after cancel, want %q", got, before)
+	}
+
+	// The request deadline passes while fn works; fn returns nil, nothing is committed and the
+	// caller can tell it was the deadline (ADR-0043).
+	ctx, cancel = context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	err = d.WithUserTx(ctx, user, func(ctx context.Context) error {
+		if err := rename(ctx, "Lost"); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("WithUserTx after the deadline: %v, want context.DeadlineExceeded", err)
+	}
+	if got := categoryName(t, user); got != before {
+		t.Errorf("category name = %q after the deadline, want %q", got, before)
+	}
+}
+
+// cleanConnection checks that the next connection from a pool of one is plain app_login: no
+// role switched, no app.user_id, no statement timeout and no transaction left open.
+func cleanConnection(t *testing.T, d *DB) {
+	t.Helper()
+	var cur, uid, timeout string
+	if err := rootQuery(t, d, `select current_user, coalesce(current_setting('app.user_id', true), ''),
+		current_setting('statement_timeout')`, &cur, &uid, &timeout); err != nil {
+		t.Fatalf("next connection: %v", err)
+	}
+	if cur != dbtest.LoginRole || uid != "" || timeout != "0" {
+		t.Errorf("next connection: current_user %q, app.user_id %q, statement_timeout %q; want %s, empty, 0",
+			cur, uid, timeout, dbtest.LoginRole)
+	}
+	// SAVEPOINT works only inside a transaction block.
+	if err := d.root.WithContext(t.Context()).Exec("savepoint clean_check").Error; sqlState(err) != noActiveTransaction {
+		t.Errorf("savepoint on the next connection: %v, want SQLSTATE %s (no transaction open)", err, noActiveTransaction)
+	}
+}
+
+// After a cancel during a statement, a statement timeout or a panic, the connection that goes
+// back to the pool (or its replacement) is plain app_login again.
+func TestConnectionAfterFailure(t *testing.T) {
+	d := testDB(t, func(c *Config) { c.MaxOpenConns = 1; c.StatementTimeout = 300 * time.Millisecond })
+	user := newUser(t, d)
+	sleep := func(ctx context.Context) error {
+		c, err := UserConn(ctx)
+		if err != nil {
+			return err
+		}
+		return c.Exec("select pg_sleep(5)").Error
+	}
+
+	t.Run("cancel during a statement", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		timer := time.AfterFunc(100*time.Millisecond, cancel)
+		defer timer.Stop()
+		if err := d.WithUserTx(ctx, user, sleep); !errors.Is(err, context.Canceled) {
+			t.Errorf("error = %v, want context.Canceled", err)
+		}
+		cleanConnection(t, d)
+	})
+
+	t.Run("statement timeout", func(t *testing.T) {
+		if err := d.WithUserTx(t.Context(), user, sleep); sqlState(err) != queryCanceled {
+			t.Errorf("error = %v, want SQLSTATE %s", err, queryCanceled)
+		}
+		cleanConnection(t, d)
+	})
+
+	t.Run("panic", func(t *testing.T) {
+		func() {
+			defer func() { _ = recover() }()
+			_ = d.WithUserTx(t.Context(), user, func(ctx context.Context) error {
+				if err := rename(ctx, "Lost"); err != nil {
+					return err
+				}
+				panic(errBoom)
+			})
+		}()
+		cleanConnection(t, d)
+	})
+}
+
+// A pooled connection whose session was changed without LOCAL (set_config(..., false), as SET
+// ROLE without LOCAL would) still gives every transaction the role and user it asked for: the
+// begin statement overrides both. The session is poisoned as app_login, through a raw connection
+// of the pool of one, so the transactions below run on that same connection.
+func TestStaleSessionOverridden(t *testing.T) {
+	d := testDB(t, func(c *Config) { c.MaxOpenConns = 1 })
+	a, b := newUser(t, d), newUser(t, d)
+
+	for _, poisonRole := range []string{"app_user", "app_auth"} {
+		t.Run("session role "+poisonRole, func(t *testing.T) {
+			conn, err := d.sqlDB.Conn(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var poisonedPID int
+			if err := conn.QueryRowContext(t.Context(), `select pg_backend_pid()
+				from (select set_config('role', $1, false), set_config('app.user_id', $2, false)) s`,
+				poisonRole, a.String()).Scan(&poisonedPID); err != nil {
+				t.Fatal(err)
+			}
+			if err := conn.Close(); err != nil { // back to the pool, still poisoned
+				t.Fatal(err)
+			}
+
+			err = d.WithUserTx(t.Context(), b, func(ctx context.Context) error {
+				c, err := UserConn(ctx)
+				if err != nil {
+					return err
+				}
+				var pid, all, ofA int
+				var cur, uid string
+				if err := c.Raw(`select pg_backend_pid(), current_user, app.current_user_id()::text,
+					(select count(*) from categories), (select count(*) from categories where owner_id = ?)`, a).
+					Row().Scan(&pid, &cur, &uid, &all, &ofA); err != nil {
+					return err
+				}
+				if pid != poisonedPID {
+					t.Fatalf("ran on backend %d, not on the poisoned %d", pid, poisonedPID)
+				}
+				if cur != "app_user" || uid != b.String() || all != 13 || ofA != 0 {
+					t.Errorf("current_user %q, user %q, %d categories, %d of A's; want app_user, %s, 13, 0",
+						cur, uid, all, ofA, b)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = d.WithAuthTx(t.Context(), func(ctx context.Context) error {
+				c, err := AuthConn(ctx)
+				if err != nil {
+					return err
+				}
+				var cur string
+				if err := c.Raw("select current_user").Row().Scan(&cur); err != nil {
+					return err
+				}
+				if cur != "app_auth" {
+					t.Errorf("auth transaction runs as %q, want app_auth", cur)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// UserOnly, the value app puts in registry.Deps, opens user transactions but is not a tx.Auth.
+func TestUserOnly(t *testing.T) {
+	u := (&DB{}).UserOnly()
+	if _, ok := u.(tx.Auth); ok {
+		t.Error("UserOnly() implements tx.Auth")
+	}
+	if _, ok := u.(*DB); ok {
+		t.Error("UserOnly() is the *DB itself")
 	}
 }
 
@@ -488,15 +661,35 @@ func TestStartupCheck(t *testing.T) {
 		want             string
 	}{
 		{name: "bypassrls", attributes: "bypassrls noinherit", extra: []string{grants}, want: "BYPASSRLS"},
+		{name: "replication", attributes: "replication noinherit", extra: []string{grants}, want: "has REPLICATION"},
+		{name: "createrole", attributes: "createrole noinherit", extra: []string{grants}, want: "has CREATEROLE"},
+		{name: "createdb", attributes: "createdb noinherit", extra: []string{grants}, want: "has CREATEDB"},
 		{
 			name: "direct select on users", attributes: "noinherit",
-			extra: []string{grants, "grant select on public.users to %s"}, want: "can read public.users",
+			extra: []string{grants, "grant select on public.users to %s"}, want: "can read public.users without",
 		},
 		{
 			name: "direct select on transactions", attributes: "noinherit",
-			extra: []string{grants, "grant select on public.transactions to %s"}, want: "can read public.users or public.transactions",
+			extra: []string{grants, "grant select on public.transactions to %s"}, want: "can read public.transactions without",
+		},
+		{
+			name: "direct select on sessions", attributes: "noinherit",
+			extra: []string{grants, "grant select on public.sessions to %s"}, want: "can read public.sessions without",
 		},
 		{name: "inherits app_auth", attributes: "inherit", extra: []string{"grant app_user, app_auth to %s with inherit true, set true"}, want: "can read"},
+		{
+			name: "inherit option without reading", attributes: "noinherit",
+			extra: []string{"grant app_user, app_auth to %s with inherit true, set true"}, want: "memberships other than SET",
+		},
+		{
+			name: "admin on app_user", attributes: "noinherit",
+			extra: []string{grants, "grant app_user to %s with admin true"}, want: "memberships other than SET without INHERIT or ADMIN on app_user and app_auth: app_user",
+		},
+		{
+			name: "SET on pg_execute_server_program", attributes: "noinherit",
+			extra: []string{grants, "grant pg_execute_server_program to %s with inherit false, set true"},
+			want:  "memberships other than SET without INHERIT or ADMIN on app_user and app_auth: pg_execute_server_program",
+		},
 		{name: "cannot switch", attributes: "noinherit", want: "cannot SET ROLE"},
 	}
 	for _, tt := range refused {
@@ -516,12 +709,57 @@ func TestStartupCheck(t *testing.T) {
 		})
 	}
 
+	// A role that owns the tables, in a database of its own (the shared test database's tables
+	// stay with the migration owner).
+	t.Run("owner of the tables", func(t *testing.T) {
+		name := throwAwayDB(t)
+		connURL, password := throwAwayRole(t, "noinherit", name, grants)
+		role := roleOf(t, connURL)
+		db := superuserOn(t, name)
+		t.Cleanup(func() { // before the role is dropped
+			if _, err := db.ExecContext(context.WithoutCancel(t.Context()), "drop owned by "+ident(role)); err != nil {
+				t.Errorf("drop owned: %v", err)
+			}
+		})
+		for _, table := range migratedTables {
+			for _, q := range []string{"create table " + table + " ()", "alter table " + table + " owner to " + ident(role)} {
+				if _, err := db.ExecContext(t.Context(), q); err != nil {
+					t.Fatalf("%s: %v", q, err)
+				}
+			}
+		}
+		_, err := Open(ctx, Config{URL: connURL, StatementTimeout: testTimeout})
+		if !errors.Is(err, ErrRoleTooPowerful) || !strings.Contains(err.Error(), "owns, or belongs to the owner of, public.categories") {
+			t.Errorf("error = %v, want ErrRoleTooPowerful naming the owned tables", err)
+		}
+		if err != nil && strings.Contains(err.Error(), password) {
+			t.Errorf("error contains the password: %v", err)
+		}
+	})
+
 	t.Run("not migrated", func(t *testing.T) {
 		login := dbtest.LoginConfig(t)
 		login.Database = throwAwayDB(t)
 		_, err := open(ctx, login, cfg)
 		if !errors.Is(err, ErrNotMigrated) || !strings.Contains(err.Error(), "make migrate") {
 			t.Errorf("error = %v, want ErrNotMigrated", err)
+		}
+	})
+
+	// Only users and transactions exist: every table of the migrations is required.
+	t.Run("partly migrated", func(t *testing.T) {
+		login := dbtest.LoginConfig(t)
+		login.Database = throwAwayDB(t)
+		db := superuserOn(t, login.Database)
+		for _, q := range []string{"create table public.users ()", "create table public.transactions ()"} {
+			if _, err := db.ExecContext(t.Context(), q); err != nil {
+				t.Fatalf("%s: %v", q, err)
+			}
+		}
+		_, err := open(ctx, login, cfg)
+		if !errors.Is(err, ErrNotMigrated) || !strings.Contains(err.Error(), "public.categories") ||
+			strings.Contains(err.Error(), "public.users") {
+			t.Errorf("error = %v, want ErrNotMigrated naming the missing tables only", err)
 		}
 	})
 

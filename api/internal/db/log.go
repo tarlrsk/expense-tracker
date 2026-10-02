@@ -2,22 +2,28 @@ package db
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
 
 // newLogger returns GORM's slog logger set to log failed statements (error level) and statements
 // slower than slow (warn level), never successful ones. Statements are logged with their
 // placeholders ($1, $2 ...) and never with parameter values: amounts and merchant names are
-// private. A Postgres error message can quote a value too (invalid input syntax for type uuid:
-// "..."), so the error is logged by its SQLSTATE and constraint only.
+// private. Errors are logged only in a value-free form (valueFree): a Postgres error message can
+// quote a value (invalid input syntax for type uuid: "..."), and so can a scan error.
 func newLogger(logger *slog.Logger, slow time.Duration) gormlogger.Interface {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
@@ -43,7 +49,7 @@ func init() {
 // in ($1$); Trace turns it back into $1.
 var explainedPlaceholder = regexp.MustCompile(`\$(\d+)\$`)
 
-// valueFreeLogger wraps GORM's slog logger and replaces Postgres errors by their code.
+// valueFreeLogger wraps GORM's slog logger and logs every error in its value-free form.
 type valueFreeLogger struct {
 	gormlogger.Interface
 }
@@ -80,14 +86,58 @@ func (l valueFreeLogger) ParamsFilter(ctx context.Context, sql string, params ..
 // data exceptions (22: invalid input syntax for type uuid: "..."), are logged by code only.
 var messageClasses = []string{"08", "25", "28", "40", "42", "53", "54", "55", "57", "58"}
 
-// valueFree replaces a Postgres error by its SQLSTATE, constraint name and, for the classes
-// above, its message. Other errors (record not found, context cancelled, connection failures)
-// carry no row values and are kept.
+// keptErrors have fixed texts that carry no row value. valueFree returns the matching one itself,
+// never the error it found it in, whose text may add more. They are: the context's end (a
+// request deadline or cancel), database/sql's and the driver's connection and transaction states,
+// a connection that ended (io.EOF), and GORM's own errors, including those it translates
+// Postgres errors into (TranslateError: duplicated key, foreign key, check constraint).
+var keptErrors = []error{
+	context.Canceled, context.DeadlineExceeded,
+	sql.ErrNoRows, sql.ErrTxDone, sql.ErrConnDone, driver.ErrBadConn,
+	io.EOF, io.ErrUnexpectedEOF,
+	gorm.ErrRecordNotFound, gorm.ErrInvalidTransaction, gorm.ErrNotImplemented, gorm.ErrMissingWhereClause,
+	gorm.ErrUnsupportedRelation, gorm.ErrPrimaryKeyRequired, gorm.ErrModelValueRequired,
+	gorm.ErrModelAccessibleFieldsRequired, gorm.ErrSubQueryRequired, gorm.ErrInvalidData,
+	gorm.ErrUnsupportedDriver, gorm.ErrRegistered, gorm.ErrInvalidField, gorm.ErrEmptySlice,
+	gorm.ErrDryRunModeUnsupported, gorm.ErrInvalidDB, gorm.ErrInvalidValue, gorm.ErrInvalidValueOfLength,
+	gorm.ErrPreloadNotAllowed, gorm.ErrDuplicatedKey, gorm.ErrForeignKeyViolated, gorm.ErrCheckConstraintViolated,
+}
+
+// valueFree returns err in a form that carries no row value. It is an allowlist:
+//   - a Postgres error becomes its SQLSTATE, constraint name and, for the classes above, its
+//     message;
+//   - an error in keptErrors becomes that error;
+//   - a failure to connect (*pgconn.ConnectError: host, user and database names and the reason)
+//     or a network error (*net.OpError: addresses and the system error) becomes that error;
+//   - anything else, a scan or conversion error for example (converting driver.Value type
+//     string ("9876.54") to a int64), is replaced by a fixed text and its Go type.
 func valueFree(err error) error {
-	var pgErr *pgconn.PgError
-	if err == nil || !errors.As(err, &pgErr) {
-		return err
+	if err == nil {
+		return nil
 	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgError(pgErr)
+	}
+	for _, kept := range keptErrors {
+		if errors.Is(err, kept) {
+			return kept
+		}
+	}
+	var connErr *pgconn.ConnectError
+	if errors.As(err, &connErr) {
+		return connErr
+	}
+	var netErr *net.OpError
+	if errors.As(err, &netErr) {
+		return netErr
+	}
+	return fmt.Errorf("error text hidden, it may quote a value: %T", err)
+}
+
+// pgError is a Postgres error by its SQLSTATE, constraint name and, for the classes in
+// messageClasses, its message.
+func pgError(pgErr *pgconn.PgError) error {
 	var b strings.Builder
 	b.WriteString("postgres error SQLSTATE ")
 	b.WriteString(pgErr.Code)

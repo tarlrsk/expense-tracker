@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/tarlrsk/expense-tracker/api/internal/db/dbtest"
@@ -100,46 +101,62 @@ var (
 	appSchema   = presence{"schema app", "select count(*) from pg_namespace where nspname = 'app'"}
 	userIDFunc  = presence{"function app.current_user_id", "select count(*) from pg_proc where oid = to_regprocedure('app.current_user_id()')"}
 	updatedFunc = presence{"function app.set_updated_at", "select count(*) from pg_proc where oid = to_regprocedure('app.set_updated_at()')"}
-	// pg_roles is shared by the whole server, so this works from any database.
-	appRoles = presence{"roles app_user, app_auth and app_login", `select (count(*) = 3)::int from pg_roles
-		where rolname in ('app_user', 'app_auth', 'app_login')`}
 )
+
+// appRoles checks that the three roles exist; pg_roles is shared by the whole server, so this
+// works from any database.
+func appRoles(roles testRoles) presence {
+	return presence{"roles " + strings.Join(roles.all(), ", "), `select (count(*) = 3)::int from pg_roles
+		where rolname in ('` + strings.Join(roles.all(), "', '") + `')`}
+}
 
 // afterDown lists, per migration version, what must be gone and what must still be there once
 // that migration is rolled back: each Down undoes exactly its own file. Rolling back 0001 is
 // checked by checkNoLeftovers.
-var afterDown = map[int64]struct{ gone, kept []presence }{
-	4: {
-		gone: []presence{table("transactions")},
-		kept: []presence{table("categories"), table("users"), seedTrigger},
-	},
-	3: {
-		gone: []presence{table("categories"), seedTrigger, seedFunction},
-		kept: []presence{table("users"), table("profiles"), updatedFunc},
-	},
-	2: {
-		gone: []presence{anyTable},
-		kept: []presence{appSchema, userIDFunc, updatedFunc, appRoles},
-	},
+func afterDown(roles testRoles) map[int64]struct{ gone, kept []presence } {
+	return map[int64]struct{ gone, kept []presence }{
+		4: {
+			gone: []presence{table("transactions")},
+			kept: []presence{table("categories"), table("users"), seedTrigger},
+		},
+		3: {
+			gone: []presence{table("categories"), seedTrigger, seedFunction},
+			kept: []presence{table("users"), table("profiles"), updatedFunc},
+		},
+		2: {
+			gone: []presence{anyTable},
+			kept: []presence{appSchema, userIDFunc, updatedFunc, appRoles(roles)},
+		},
+	}
 }
 
 // Up, down one file at a time to nothing, and up again, in a throw-away database on the test
 // server.
 //
-// The shared test database is migrated first, so it keeps using app_user and app_auth: the down
-// sections must then leave both roles, and app_login with them, in place (they belong to the
-// whole server), and tests in other packages running at the same time are not disturbed. The branch where down drops the
+// The roles are renamed to throw-away names, so this test never changes the server-wide
+// app_user, app_auth and app_login that tests in other packages use at the same time (some of
+// those give the roles extra members for a moment, which the role check of 0001 would refuse).
+// A second database migrated first keeps using the renamed roles: the down sections must then
+// leave all three in place (they belong to the whole server). The branch where down drops the
 // roles is covered by TestNonSuperuserOwner.
 func TestRoundTrip(t *testing.T) {
 	shared := dbtest.DB(t)
 	cfg := dbtest.Config(t)
-	dir, err := dbtest.MigrationsDir()
-	if err != nil {
-		t.Fatal(err)
-	}
+	roles := newTestRoles(t)
+	throwAwayRoles(t, shared, roles.all()...) // runs after both databases are dropped
+	dir := renamedMigrations(t, roles)
 	files, err := filepath.Glob(filepath.Join(dir, "*.sql"))
 	if err != nil || len(files) == 0 {
 		t.Fatalf("no migration files in %s: %v", dir, err)
+	}
+	ctx := t.Context()
+
+	other, err := migrate.New(connect(t, cfg, throwAwayDB(t, shared, "")), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.Up(ctx); err != nil {
+		t.Fatalf("up of the database that keeps the roles in use: %v", err)
 	}
 
 	db := connect(t, cfg, throwAwayDB(t, shared, ""))
@@ -147,7 +164,6 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := t.Context()
 
 	applied, err := m.Up(ctx)
 	if err != nil {
@@ -160,13 +176,13 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal("no tables after up")
 	}
 
-	checked := 0
+	checked, steps := 0, afterDown(roles)
 	for range files {
 		r, err := m.Down(ctx)
 		if err != nil {
 			t.Fatalf("down: %v", err)
 		}
-		step, ok := afterDown[r.Version]
+		step, ok := steps[r.Version]
 		if ok {
 			checked++
 		}
@@ -181,16 +197,16 @@ func TestRoundTrip(t *testing.T) {
 			}
 		}
 	}
-	if checked != len(afterDown) {
-		t.Errorf("checked %d of the %d per-file down steps", checked, len(afterDown))
+	if checked != len(steps) {
+		t.Errorf("checked %d of the %d per-file down steps", checked, len(steps))
 	}
 	if _, err := m.Down(ctx); !errors.Is(err, migrate.ErrNothingToRollBack) {
 		t.Fatalf("down with nothing applied: %v, want ErrNothingToRollBack", err)
 	}
 
 	checkNoLeftovers(t, db, "after down")
-	if n := roleCount(t, shared, "app_user", "app_auth", "app_login"); n != 3 {
-		t.Errorf("after down: %d of the 3 roles left; the shared test database still uses them", n)
+	if n := roleCount(t, shared, roles.all()...); n != 3 {
+		t.Errorf("after down: %d of the 3 roles left; the other database still uses them", n)
 	}
 
 	applied, err = m.Up(ctx)

@@ -18,7 +18,8 @@ import (
 type Deps struct {
 	Config config.Config
 	Logger *slog.Logger
-	// UserTx opens transactions as app_user (WithUserTx).
+	// UserTx opens transactions as app_user (WithUserTx). It is not a tx.Auth: a type
+	// assertion to tx.Auth fails (db.DB.UserOnly).
 	UserTx tx.User
 }
 

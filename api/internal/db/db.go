@@ -4,8 +4,13 @@
 //
 // The API logs in as app_login, a role that owns nothing and may only switch to app_user or
 // app_auth. Open refuses a connection whose role could read data without switching (Check), so
-// a query that somehow ran outside a transaction would see nothing. The root *gorm.DB never
-// leaves this package.
+// a query that somehow ran outside a transaction would see nothing.
+//
+// The root *gorm.DB is not exported, but UserConn and AuthConn return a GORM handle from which
+// GORM would reach the pool (DB(), ConnPool, Connection, Begin ...). Lint rules (forbidigo in
+// .golangci.yml) forbid those outside this package. Every transaction sets its role, user and
+// timeout with set_config(..., true) at begin, so a connection's leftover session settings
+// never decide what a transaction sees.
 package db
 
 import (

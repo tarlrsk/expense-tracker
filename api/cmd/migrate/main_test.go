@@ -7,10 +7,12 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -114,6 +116,12 @@ func TestLoginURLBase(t *testing.T) {
 		},
 		{name: "missing database filled in", dsn: "postgres://" + owner + "h", database: "neondb", want: "postgres://h/neondb"},
 		{name: "owner in query parameters dropped", dsn: "postgres://h/db?user=owner&password=pw&sslmode=require", want: "postgres://h/db?sslmode=require"},
+		{
+			// The client certificate logs in the owner; the server's CA stays.
+			name: "owner's client certificate dropped",
+			dsn:  "postgres://" + owner + "h/db?sslmode=verify-full&sslrootcert=/ca.pem&sslcert=/c.pem&sslkey=/k.pem&sslpassword=pw",
+			want: "postgres://h/db?sslmode=verify-full&sslrootcert=%2Fca.pem",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -133,6 +141,21 @@ func TestLoginURLBase(t *testing.T) {
 type loginFixture struct {
 	role, ownerPassword string
 	getenv              func(string) string
+	ownerURL            url.URL
+}
+
+// withQuery returns a getenv whose owner URL has rawQuery as its query.
+func (f loginFixture) withQuery(t *testing.T, rawQuery string) func(string) string {
+	t.Helper()
+	u := f.ownerURL
+	u.RawQuery = rawQuery
+	return func(name string) string {
+		if name != "MIGRATION_DATABASE_URL" {
+			t.Errorf("read setting %s", name)
+			return ""
+		}
+		return u.String()
+	}
 }
 
 func newLoginFixture(t *testing.T) loginFixture {
@@ -173,7 +196,7 @@ func newLoginFixture(t *testing.T) loginFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return loginFixture{role: role, ownerPassword: ownerPassword, getenv: func(name string) string {
+	return loginFixture{role: role, ownerPassword: ownerPassword, ownerURL: ownerURL, getenv: func(name string) string {
 		if name != "MIGRATION_DATABASE_URL" {
 			t.Errorf("read setting %s", name)
 			return ""
@@ -187,8 +210,14 @@ func newLoginFixture(t *testing.T) loginFixture {
 // It returns the exit code, the URL from the line ("" when none) and stderr.
 func (f loginFixture) run(t *testing.T, steps passwordSteps) (code int, line, stderrText string) {
 	t.Helper()
+	return f.runEnv(t, f.getenv, steps)
+}
+
+// runEnv is run with another MIGRATION_DATABASE_URL.
+func (f loginFixture) runEnv(t *testing.T, getenv func(string) string, steps passwordSteps) (code int, line, stderrText string) {
+	t.Helper()
 	var stdout, stderr bytes.Buffer
-	code = runWith(t.Context(), []string{"login-password"}, f.getenv, &stdout, &stderr, f.role, steps)
+	code = runWith(t.Context(), []string{"login-password"}, getenv, &stdout, &stderr, f.role, steps)
 	if out := stdout.String() + stderr.String(); strings.Contains(out, f.ownerPassword) {
 		t.Errorf("output contains the owner's password: %q", out)
 	}
@@ -271,9 +300,10 @@ func TestLoginPassword(t *testing.T) {
 	}
 }
 
-// When the pre-hashed password does not log in, the plain form is used, said so on stderr, and
-// the line is printed only once it logs in. When nothing logs in, or the check itself fails, no
-// line is printed and the exit code is not 0.
+// When the pre-hashed form is refused by ALTER ROLE or does not log in, the plain form is used,
+// said so on stderr, and the line is printed only once it logs in. Each form gets several test
+// logins before it is judged. When nothing logs in, or the check itself fails, no line is printed
+// and the exit code is not 0.
 func TestLoginPasswordVerification(t *testing.T) {
 	// wrongHashed and wrongPlain set a password other than the one that will be printed.
 	wrongHashed := func(ctx context.Context, db *sql.DB, role, password string) error {
@@ -282,34 +312,101 @@ func TestLoginPasswordVerification(t *testing.T) {
 	wrongPlain := func(ctx context.Context, db *sql.DB, role, password string) error {
 		return setPlainPassword(ctx, db, role, "wrong-"+password)
 	}
+	failAlter := func(code string) func(context.Context, *sql.DB, string, string) error {
+		return func(context.Context, *sql.DB, string, string) error {
+			return fmt.Errorf("alter role: %w", &pgconn.PgError{Code: code, Message: "refused by the test"})
+		}
+	}
+	authFailure := &pgconn.PgError{Code: "28P01", Message: "password authentication failed"}
+	const tries = 5
+
 	tests := []struct {
 		name       string
-		steps      passwordSteps
+		steps      func(t *testing.T, logins *int) passwordSteps
 		wantLine   bool
 		wantNotice bool
 		wantErr    string
+		wantLogins int // when not 0: how many test logins were made
 	}{
 		{
-			name:     "hashed form refused, plain form works",
-			steps:    passwordSteps{setHashed: wrongHashed, setPlain: setPlainPassword, login: tryLogin},
-			wantLine: true, wantNotice: true,
+			name: "hashed form does not log in, plain form works",
+			steps: func(_ *testing.T, logins *int) passwordSteps {
+				return passwordSteps{setHashed: wrongHashed, setPlain: setPlainPassword, login: counted(logins, tryLogin)}
+			},
+			wantLine: true, wantNotice: true, wantLogins: tries + 1,
 		},
 		{
-			name:       "neither form logs in",
-			steps:      passwordSteps{setHashed: wrongHashed, setPlain: wrongPlain, login: tryLogin},
-			wantNotice: true, wantErr: "does not log in, neither pre-hashed nor plain",
+			name: "neither form logs in",
+			steps: func(_ *testing.T, logins *int) passwordSteps {
+				return passwordSteps{setHashed: wrongHashed, setPlain: wrongPlain, login: counted(logins, tryLogin)}
+			},
+			wantNotice: true, wantErr: "does not log in, neither pre-hashed nor plain", wantLogins: 2 * tries,
 		},
 		{
 			name: "check fails for another reason",
-			steps: passwordSteps{setHashed: setHashedPassword, setPlain: setPlainPassword,
-				login: func(context.Context, string) error { return errors.New("network unreachable") }},
-			wantErr: "could not check",
+			steps: func(_ *testing.T, logins *int) passwordSteps {
+				return passwordSteps{
+					setHashed: setHashedPassword, setPlain: setPlainPassword,
+					login: counted(logins, func(context.Context, string) error { return errors.New("network unreachable") }),
+				}
+			},
+			wantErr: "could not check", wantLogins: tries,
+		},
+		{
+			// A proxy that needs a moment to see the new password: the hashed form is kept.
+			name: "login works on the third try",
+			steps: func(_ *testing.T, logins *int) passwordSteps {
+				return passwordSteps{
+					setHashed: setHashedPassword, setPlain: setPlainPassword,
+					login: counted(logins, func(ctx context.Context, connURL string) error {
+						if *logins < 3 {
+							return authFailure
+						}
+						return tryLogin(ctx, connURL)
+					}),
+				}
+			},
+			wantLine: true, wantLogins: 3,
+		},
+		{
+			name: "ALTER ROLE refuses the verifier, plain form works",
+			steps: func(_ *testing.T, logins *int) passwordSteps {
+				return passwordSteps{setHashed: failAlter("22023"), setPlain: setPlainPassword, login: counted(logins, tryLogin)}
+			},
+			wantLine: true, wantNotice: true, wantLogins: 1,
+		},
+		{
+			name: "ALTER ROLE fails without a Postgres error, plain form works",
+			steps: func(_ *testing.T, logins *int) passwordSteps {
+				return passwordSteps{
+					setHashed: func(context.Context, *sql.DB, string, string) error { return errors.New("unexpected reply") },
+					setPlain:  setPlainPassword, login: counted(logins, tryLogin),
+				}
+			},
+			wantLine: true, wantNotice: true, wantLogins: 1,
+		},
+		{
+			name: "ALTER ROLE not allowed: no fallback",
+			steps: func(t *testing.T, logins *int) passwordSteps {
+				return passwordSteps{setHashed: failAlter("42501"), setPlain: mustNotSet(t), login: counted(logins, tryLogin)}
+			},
+			wantErr: "may not change the password",
+		},
+		{
+			name: "role missing: no fallback",
+			steps: func(t *testing.T, logins *int) passwordSteps {
+				return passwordSteps{setHashed: failAlter("42704"), setPlain: mustNotSet(t), login: counted(logins, tryLogin)}
+			},
+			wantErr: "does not exist",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newLoginFixture(t)
-			code, line, stderr := f.run(t, tt.steps)
+			logins := 0
+			steps := tt.steps(t, &logins)
+			steps.tries, steps.pause = tries, time.Millisecond
+			code, line, stderr := f.run(t, steps)
 			t.Logf("stderr: %s", stderr)
 			if tt.wantLine != (line != "") || tt.wantLine != (code == 0) {
 				t.Fatalf("exit code %d, line %q; want a line %v (stderr %q)", code, line, tt.wantLine, stderr)
@@ -320,12 +417,54 @@ func TestLoginPasswordVerification(t *testing.T) {
 			if tt.wantErr != "" && !strings.Contains(stderr, tt.wantErr) {
 				t.Errorf("stderr = %q, want it to contain %q", stderr, tt.wantErr)
 			}
+			if tt.wantLogins != 0 && logins != tt.wantLogins {
+				t.Errorf("%d test logins, want %d", logins, tt.wantLogins)
+			}
 			if tt.wantLine {
 				if err := connectAs(t, line, f.role); err != nil {
 					t.Errorf("the printed line does not log in: %v", err)
 				}
 			}
 		})
+	}
+}
+
+// counted wraps a login step and counts its calls.
+func counted(n *int, login func(context.Context, string) error) func(context.Context, string) error {
+	return func(ctx context.Context, connURL string) error {
+		*n++
+		return login(ctx, connURL)
+	}
+}
+
+// mustNotSet is a password step that fails the test when called.
+func mustNotSet(t *testing.T) func(context.Context, *sql.DB, string, string) error {
+	t.Helper()
+	return func(context.Context, *sql.DB, string, string) error {
+		t.Error("a password was set although it must not be")
+		return nil
+	}
+}
+
+// A line with a single quote could not be pasted into the settings file inside '...': it is
+// refused before the password changes, so the role still has none.
+func TestLoginPasswordRefusesQuote(t *testing.T) {
+	f := newLoginFixture(t)
+	notCalled := passwordSteps{
+		setHashed: mustNotSet(t), setPlain: mustNotSet(t),
+		login: func(context.Context, string) error { t.Error("logged in"); return nil },
+	}
+	code, line, stderr := f.runEnv(t, f.withQuery(t, "sslmode=disable&application_name=it's"), notCalled)
+	if code == 0 || line != "" || !strings.Contains(stderr, "single quote") || !strings.Contains(stderr, "nothing was changed") {
+		t.Errorf("exit code %d, line %q, stderr %q; want a refusal naming the single quote", code, line, stderr)
+	}
+	var hasPassword bool
+	if err := dbtest.DB(t).QueryRowContext(t.Context(),
+		"select rolpassword is not null from pg_authid where rolname = $1", f.role).Scan(&hasPassword); err != nil {
+		t.Fatal(err)
+	}
+	if hasPassword {
+		t.Error("the role got a password although the run was refused")
 	}
 }
 

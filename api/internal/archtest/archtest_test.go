@@ -72,6 +72,17 @@ func TestFixtures(t *testing.T) {
 			"8 categories/processor/create/processor_test.go",
 			"8 handler/mail/send.go",
 		}},
+		{fixture: "rule9", want: []string{
+			"9 app/app.go",
+			"9 categories/port/insert/adaptor_pg.go",
+			"9 categories/port/insert/adaptor_pg_test.go",
+		}},
+		{fixture: "rule10", want: []string{
+			"10 categories/port/list/port.go",
+			"10 categories/processor/create/processor.go",
+			"10 middleware/auth.go",
+			"10 registry/categories/create.go",
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.fixture, func(t *testing.T) {

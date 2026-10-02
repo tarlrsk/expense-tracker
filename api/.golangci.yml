@@ -6,6 +6,7 @@ linters:
     - bodyclose
     - depguard
     - errorlint
+    - forbidigo
     - gosec
     - misspell
     - noctx
@@ -36,6 +37,32 @@ linters:
           deny:
             - pkg: github.com/gin-gonic/gin
               desc: gin is allowed only in handler, registry, app and middleware (ADR-0032)
+    forbidigo:
+      # Adaptors use only the connection of the open transaction, from db.UserConn or db.AuthConn
+      # (ADR-0032). From that GORM handle these would reach the root pool (DB, ConnPool,
+      # Connection), end or nest the transaction behind internal/db's back (Begin, Transaction,
+      # the *sql.Tx in Statement.ConnPool) or open a new pool (gorm.Open). Session is forbidden
+      # as a whole: the linter cannot see which gorm.Session fields a call sets. Only internal/db
+      # may use them (exclusions below); tests are exempt.
+      analyze-types: true
+      forbid:
+        - pattern: '^gorm\.DB\.(DB|Connection|Begin|Transaction|Session|Commit|Rollback|SavePoint|RollbackTo)$'
+          pkg: '^gorm\.io/gorm$'
+          msg: only internal/db may use this; adaptors get their connection from db.UserConn or db.AuthConn (ADR-0032)
+        - pattern: '^gorm\..*ConnPool$'
+          pkg: '^gorm\.io/gorm$'
+          msg: the connection pool belongs to internal/db; adaptors get their connection from db.UserConn or db.AuthConn (ADR-0032)
+        - pattern: '^gorm\.Open$'
+          pkg: '^gorm\.io/gorm$'
+          msg: only internal/db opens the database (ADR-0032)
+  exclusions:
+    rules:
+      - path: internal/db/
+        linters:
+          - forbidigo
+      - path: _test\.go$
+        linters:
+          - forbidigo
 
 formatters:
   enable:

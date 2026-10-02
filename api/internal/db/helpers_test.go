@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/tarlrsk/expense-tracker/api/internal/db/dbtest"
 )
@@ -22,6 +24,7 @@ import (
 const (
 	insufficientPrivilege = "42501"
 	queryCanceled         = "57014"
+	noActiveTransaction   = "25P01"
 )
 
 // testTimeout is the statement timeout of testDB unless a test sets another.
@@ -164,6 +167,26 @@ func throwAwayDB(t *testing.T) string {
 		t.Fatalf("create database: %v", err)
 	}
 	return name
+}
+
+// roleOf returns the user name of a connection URL made by throwAwayRole.
+func roleOf(t *testing.T, connURL string) string {
+	t.Helper()
+	u, err := url.Parse(connURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.User.Username()
+}
+
+// superuserOn connects to database as the test superuser; the pool is closed when the test ends.
+func superuserOn(t *testing.T, database string) *sql.DB {
+	t.Helper()
+	cfg := dbtest.Config(t)
+	cfg.Database = database
+	db := stdlib.OpenDB(*cfg)
+	t.Cleanup(func() { _ = db.Close() })
+	return db
 }
 
 // rootQuery runs a query on the pool outside any transaction, as the bare login role. Only tests
