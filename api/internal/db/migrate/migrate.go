@@ -32,7 +32,7 @@ const (
 // Result is one migration that was applied or rolled back.
 type Result struct {
 	Version  int64
-	Name     string // file name, e.g. 0001_init.sql
+	Name     string // file name, e.g. 0001_setup_and_roles.sql
 	Duration time.Duration
 }
 

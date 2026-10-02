@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/tarlrsk/expense-tracker/api/internal/db/dbtest"
+	"github.com/tarlrsk/expense-tracker/api/internal/db/migrate"
 )
 
 // randomHex returns n random bytes as hex: unique names for throw-away objects.
@@ -111,6 +113,20 @@ func renamedMigrations(t *testing.T, roles testRoles) string {
 		}
 	}
 	return dst
+}
+
+// downAll rolls back every applied migration, one file at a time, until none is left.
+func downAll(t *testing.T, m *migrate.Migrator) {
+	t.Helper()
+	for {
+		_, err := m.Down(t.Context())
+		if errors.Is(err, migrate.ErrNothingToRollBack) {
+			return
+		}
+		if err != nil {
+			t.Fatalf("down: %v", err)
+		}
+	}
 }
 
 func count(t *testing.T, q queryer, query string, args ...any) int {

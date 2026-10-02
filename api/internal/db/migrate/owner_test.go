@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/pressly/goose/v3"
 
 	"github.com/tarlrsk/expense-tracker/api/internal/db/dbtest"
 	"github.com/tarlrsk/expense-tracker/api/internal/db/migrate"
@@ -92,13 +93,11 @@ func TestNonSuperuserOwner(t *testing.T) {
 		rlsAndCascade(t, login, roles)
 	})
 
-	// The roles are dropped by down; close the login role's connections first.
+	// The roles are dropped by the last down (0001); close the login role's connections first.
 	if err := login.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Down(t.Context()); err != nil {
-		t.Fatalf("down: %v", err)
-	}
+	downAll(t, m)
 	checkNoLeftovers(t, db, "after down")
 	if n := roleCount(t, shared, roles.all()...); n != 0 {
 		t.Errorf("after down: %d of the 3 throw-away roles left; down should drop roles no one uses", n)
@@ -190,8 +189,8 @@ func memberships(t *testing.T, shared *sql.DB, member string) []string {
 	return out
 }
 
-// A role that already exists with powers it must not have stops the migration, and the failed
-// migration leaves nothing behind.
+// A role that already exists with powers it must not have stops the migration in its first file,
+// and the failed run leaves nothing behind: no object, no role, no goose version row.
 func TestPreexistingBadRole(t *testing.T) {
 	shared := dbtest.DB(t)
 	cfg := dbtest.Config(t)
@@ -232,6 +231,15 @@ func TestPreexistingBadRole(t *testing.T) {
 			}
 			if len(applied) != 0 {
 				t.Errorf("up reports %d applied migrations", len(applied))
+			}
+			// The role check is in the first file: nothing after it may have run.
+			var partial *goose.PartialError
+			if !errors.As(err, &partial) || partial.Failed == nil || partial.Failed.Source.Version != 1 {
+				t.Errorf("up failed with %v; want it to fail in migration 1", err)
+			}
+			// goose's own baseline row (version 0) is all its table may hold.
+			if n := count(t, db, "select count(*) from goose_db_version where version_id <> 0"); n != 0 {
+				t.Errorf("the failed up left %d goose version rows beyond the baseline", n)
 			}
 
 			checkNoLeftovers(t, db, "after the failed up")
