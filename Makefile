@@ -3,12 +3,16 @@ GOBIN := $(shell $(GO) env GOPATH)/bin
 GOLANGCI_LINT_VERSION := v2.14.0
 GOLANGCI_LINT ?= $(GOBIN)/golangci-lint
 NPM ?= npm
+DOCKER_COMPOSE ?= docker compose
+# The Docker test database (service postgres-test). make test never loads .env.
+TEST_DATABASE_URL ?= postgres://postgres:postgres@127.0.0.1:5433/expense_test?sslmode=disable
+MIGRATIONS_DIR := ../db/migrations
 
 .DEFAULT_GOAL := help
-.PHONY: help tools test lint run web-install web-dev
+.PHONY: help tools test lint run migrate migrate-status migrate-down web-install web-dev
 
 help: ## List the targets
-	@grep -E '^[a-z][a-z-]*:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
+	@grep -E '^[a-z][a-z-]*:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-16s %s\n", $$1, $$2}'
 
 tools: ## Install golangci-lint (pinned version, sha256-checked) into GOPATH/bin
 	@set -eu; \
@@ -24,9 +28,11 @@ tools: ## Install golangci-lint (pinned version, sha256-checked) into GOPATH/bin
 	install -m 0755 "$$tmp/$$name/golangci-lint" "$(GOBIN)/golangci-lint"; \
 	"$(GOBIN)/golangci-lint" version
 
-# Starting postgres-test and applying the migrations is added in PLAN-0002 T3.
-test: ## Run the API tests, then the web tests
-	cd api && $(GO) test ./...
+# The API tests apply the migrations to the test database themselves (internal/db/dbtest).
+# -count=1: Go's test cache does not see changes in db/migrations or in the database.
+test: ## Start postgres-test, run the API tests on it, then the web tests
+	$(DOCKER_COMPOSE) up -d --wait postgres-test
+	cd api && TEST_DATABASE_URL='$(TEST_DATABASE_URL)' $(GO) test -count=1 ./...
 	cd web && $(NPM) test
 
 lint: ## Lint the API, then lint, format-check and type-check the web
@@ -38,6 +44,23 @@ lint: ## Lint the API, then lint, format-check and type-check the web
 run: ## Run the API (loads .env if it exists)
 	@set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \
 	cd api && $(GO) run ./cmd/api
+
+migrate: ## Apply all pending migrations to DATABASE_URL (loads .env if it exists)
+	@set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \
+	cd api && $(GO) run ./cmd/migrate -dir $(MIGRATIONS_DIR) up
+
+migrate-status: ## List the migrations and whether each is applied to DATABASE_URL (loads .env)
+	@set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \
+	cd api && $(GO) run ./cmd/migrate -dir $(MIGRATIONS_DIR) status
+
+migrate-down: ## Roll back the latest migration on DATABASE_URL; needs CONFIRM=yes (loads .env)
+	@if [ "$(CONFIRM)" != "yes" ]; then \
+		echo "migrate-down rolls back the latest migration and can delete data."; \
+		echo "Run: make migrate-down CONFIRM=yes"; \
+		exit 1; \
+	fi; \
+	set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \
+	cd api && $(GO) run ./cmd/migrate -dir $(MIGRATIONS_DIR) down
 
 web-install: ## Install the web dependencies from package-lock.json
 	cd web && $(NPM) ci
