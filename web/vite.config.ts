@@ -34,8 +34,8 @@ export default defineConfig({
       // Icons are already precached by globPatterns below.
       includeManifestIcons: false,
       manifest: {
-        name: 'Expense Tracker',
-        short_name: 'Expenses',
+        name: 'Satang',
+        short_name: 'Satang',
         start_url: '/',
         scope: '/',
         display: 'standalone',

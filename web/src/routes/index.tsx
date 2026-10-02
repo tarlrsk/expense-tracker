@@ -19,7 +19,7 @@ function HomePage() {
 
   return (
     <div className="flex flex-col gap-6 py-6">
-      <h1 className="text-2xl font-semibold">Expense Tracker</h1>
+      <h1 className="text-2xl font-semibold">Satang</h1>
 
       <section aria-labelledby="server-status" className="flex flex-col gap-4">
         <h2 id="server-status" className="text-lg font-medium">
