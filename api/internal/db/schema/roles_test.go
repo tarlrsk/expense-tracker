@@ -5,44 +5,58 @@ import (
 	"testing"
 )
 
-// The API's two roles cannot log in and have no special powers (ADR-0019, ADR-0034).
+// The API's two working roles cannot log in and have no special powers (ADR-0019, ADR-0034).
 func TestRoleAttributes(t *testing.T) {
 	s := begin(t)
-	for _, role := range []string{"app_user", "app_auth"} {
+	for _, role := range []string{"app_user", "app_auth", "app_login"} {
 		t.Run(role, func(t *testing.T) {
 			var login, super, bypassRLS, createRole, createDB, inherit, replication bool
 			s.scan(t, `select rolcanlogin, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolinherit, rolreplication
 				from pg_roles where rolname = $1`, []any{role},
 				&login, &super, &bypassRLS, &createRole, &createDB, &inherit, &replication)
+			// Only app_login, the role the API logs in as, may log in.
+			if want := role == "app_login"; login != want {
+				t.Errorf("%s login = %v, want %v", role, login, want)
+			}
 			for name, got := range map[string]bool{
-				"login": login, "superuser": super, "bypassrls": bypassRLS, "createrole": createRole,
+				"superuser": super, "bypassrls": bypassRLS, "createrole": createRole,
 				"createdb": createDB, "inherit": inherit, "replication": replication,
 			} {
 				if got {
 					t.Errorf("%s has %s", role, name)
 				}
 			}
-			if n := s.count(t, "select count(*) from pg_auth_members where member = $1::regrole", role); n != 0 {
-				t.Errorf("%s is a member of %d roles, want none", role, n)
-			}
 		})
 	}
 }
 
-// The connecting owner may SET ROLE to both roles but does not inherit their rights.
+// Memberships: app_login may SET ROLE to app_user and app_auth and nothing else, without
+// inheriting their rights or administering them; app_user and app_auth belong to nobody.
+func TestMemberships(t *testing.T) {
+	s := begin(t)
+	got := s.strings(t, `select m.roleid::regrole::text || ' inherit=' || m.inherit_option || ' set=' || m.set_option
+			|| ' admin=' || m.admin_option
+		from pg_auth_members m where m.member = 'app_login'::regrole order by 1`)
+	want := []string{"app_auth inherit=false set=true admin=false", "app_user inherit=false set=true admin=false"}
+	if !slices.Equal(got, want) {
+		t.Errorf("app_login memberships = %v, want %v", got, want)
+	}
+	for _, role := range []string{"app_user", "app_auth"} {
+		if n := s.count(t, "select count(*) from pg_auth_members where member = $1::regrole", role); n != 0 {
+			t.Errorf("%s is a member of %d roles, want none", role, n)
+		}
+	}
+}
+
+// The connecting owner (the migration role) cannot SET ROLE to app_user or app_auth through a
+// membership: only migrations use it, and they never switch (the API logs in as app_login).
 func TestOwnerMembership(t *testing.T) {
 	s := begin(t)
 	for _, role := range []string{"app_user", "app_auth"} {
 		t.Run(role, func(t *testing.T) {
-			var canSet, inherits bool
-			s.scan(t, `select coalesce(bool_or(set_option), false), coalesce(bool_or(inherit_option), false)
-				from pg_auth_members where roleid = $1::regrole and member = current_user::regrole`,
-				[]any{role}, &canSet, &inherits)
-			if !canSet {
-				t.Errorf("owner cannot SET ROLE %s", role)
-			}
-			if inherits {
-				t.Errorf("owner inherits the rights of %s", role)
+			if n := s.count(t, `select count(*) from pg_auth_members
+				where roleid = $1::regrole and member = current_user::regrole and (set_option or inherit_option)`, role); n != 0 {
+				t.Errorf("owner has a SET or INHERIT membership in %s", role)
 			}
 		})
 	}
@@ -99,6 +113,14 @@ func TestSchemaGuards(t *testing.T) {
 				[]any{c.table, c.column}, &canUpdate)
 			if canUpdate {
 				t.Errorf("app_user can update %s.%s", c.table, c.column)
+			}
+		}
+	})
+
+	t.Run("app_login on no table", func(t *testing.T) {
+		for _, table := range tables {
+			if privs := privileges(t, s, "app_login", table); len(privs) > 0 {
+				t.Errorf("app_login has %v on %s", privs, table)
 			}
 		}
 	})

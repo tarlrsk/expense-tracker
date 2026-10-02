@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tarlrsk/expense-tracker/api/internal/config"
+	"github.com/tarlrsk/expense-tracker/api/internal/db"
 	"github.com/tarlrsk/expense-tracker/api/internal/registry"
 )
 
@@ -22,10 +23,14 @@ const (
 	writeTimeoutExtra = 10 * time.Second
 	idleTimeout       = 120 * time.Second
 	shutdownTimeout   = 10 * time.Second
+	// dbStartupTimeout covers connecting and the startup check, including a cold Neon start.
+	dbStartupTimeout = 30 * time.Second
 )
 
-// Run starts the HTTP server and blocks until ctx is done, SIGINT or SIGTERM
-// arrives, or the server fails. It then shuts down gracefully.
+// Run opens the database, starts the HTTP server and blocks until ctx is done, SIGINT or SIGTERM
+// arrives, or the server fails. It then shuts down gracefully and closes the database.
+// It refuses to start when DATABASE_URL is missing, the database cannot be reached, or the role
+// it logs in as could read data outside WithUserTx / WithAuthTx (db.Check).
 func Run(ctx context.Context) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -38,7 +43,19 @@ func Run(ctx context.Context) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	engine, err := NewEngine(registry.Deps{Config: cfg, Logger: logger})
+	database, err := openDB(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			logger.LogAttrs(context.WithoutCancel(ctx), slog.LevelError, "close database", slog.String("error", err.Error()))
+		}
+	}()
+
+	// database is also the auth transactor (tx.Auth). It is not in Deps: it goes only to the
+	// account module's Register, from PLAN-0002 T5 on (ADR-0032, ADR-0034).
+	engine, err := NewEngine(registry.Deps{Config: cfg, Logger: logger, UserTx: database})
 	if err != nil {
 		return fmt.Errorf("build engine: %w", err)
 	}
@@ -78,4 +95,22 @@ func Run(ctx context.Context) error {
 		return fmt.Errorf("serve: %w", err)
 	}
 	return nil
+}
+
+// openDB connects to DATABASE_URL and runs the startup check. /api/healthz never uses it
+// (ADR-0048).
+func openDB(ctx context.Context, cfg config.Config, logger *slog.Logger) (*db.DB, error) {
+	ctx, cancel := context.WithTimeout(ctx, dbStartupTimeout)
+	defer cancel()
+	database, err := db.Open(ctx, db.Config{
+		URL:              cfg.DatabaseURL.Reveal(),
+		StatementTimeout: cfg.DBStatementTimeout,
+		MaxOpenConns:     cfg.DBMaxOpenConns,
+		Logger:           logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("open the database: %w", err)
+	}
+	logger.LogAttrs(ctx, slog.LevelInfo, "database ready")
+	return database, nil
 }

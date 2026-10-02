@@ -1,7 +1,9 @@
 package migrate_test
 
 import (
+	"database/sql"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,16 +15,19 @@ import (
 
 // The migration as Neon runs it: the database owner is not a superuser, has LOGIN, CREATEROLE and
 // BYPASSRLS, and creates the app roles itself. The roles are renamed to throw-away names, because
-// app_user and app_auth already exist on the test server (made by the superuser) and are in use.
-// This also covers the branch the round trip never reaches: down drops the roles.
+// app_user, app_auth and app_login already exist on the test server (made by the superuser) and
+// are in use. This also covers the branch the round trip never reaches: down drops the roles.
+//
+// The owner no longer switches roles. The RLS and cascade checks log in as the renamed login
+// role, with a password the owner sets on it as `make db-login-password` does.
 func TestNonSuperuserOwner(t *testing.T) {
 	shared := dbtest.DB(t)
 	cfg := dbtest.Config(t)
-	suffix := randomHex(t, 6)
-	owner, userRole, authRole := "t"+suffix+"_owner", "t"+suffix+"_user", "t"+suffix+"_auth"
+	roles := newTestRoles(t)
+	owner := strings.TrimSuffix(roles.user, "_user") + "_owner"
 	password := randomHex(t, 16)
 
-	throwAwayRoles(t, shared, userRole, authRole, owner) // runs after the database is dropped
+	throwAwayRoles(t, shared, append(roles.all(), owner)...) // runs after the database is dropped
 	if _, err := shared.ExecContext(t.Context(),
 		"create role "+ident(owner)+" login nosuperuser createrole bypassrls password '"+password+"'"); err != nil {
 		t.Fatalf("create owner role: %v", err)
@@ -37,7 +42,7 @@ func TestNonSuperuserOwner(t *testing.T) {
 		t.Fatalf("not running as a non-superuser (super %v, err %v)", isSuper, err)
 	}
 
-	m, err := migrate.New(db, renamedMigrations(t, userRole, authRole))
+	m, err := migrate.New(db, renamedMigrations(t, roles))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,81 +50,144 @@ func TestNonSuperuserOwner(t *testing.T) {
 		t.Fatalf("up as non-superuser owner: %v", err)
 	}
 
-	t.Run("owner membership", func(t *testing.T) {
-		for _, role := range []string{userRole, authRole} {
-			var canSet, inherits bool
-			if err := shared.QueryRowContext(t.Context(), `
-				select coalesce(bool_or(set_option), false), coalesce(bool_or(inherit_option), false)
-				from pg_auth_members where roleid = $1::regrole and member = $2::regrole`, role, owner).
-				Scan(&canSet, &inherits); err != nil {
-				t.Fatal(err)
+	t.Run("owner cannot switch", func(t *testing.T) {
+		for _, role := range []string{roles.user, roles.auth} {
+			if n := count(t, shared, `select count(*) from pg_auth_members
+				where roleid = $1::regrole and member = $2::regrole and (set_option or inherit_option)`, role, owner); n != 0 {
+				t.Errorf("owner has a SET or INHERIT membership in %s", role)
 			}
-			if !canSet || inherits {
-				t.Errorf("owner on %s: set %v, inherit %v; want set true, inherit false", role, canSet, inherits)
+		}
+	})
+
+	t.Run("login role memberships", func(t *testing.T) {
+		got := memberships(t, shared, roles.login)
+		want := []string{roles.auth + " inherit=false set=true admin=false", roles.user + " inherit=false set=true admin=false"}
+		slices.Sort(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("memberships = %v, want %v", got, want)
+		}
+	})
+
+	// The owner sets the login role's password, as make db-login-password does on Neon.
+	loginPassword := randomHex(t, 16)
+	if _, err := db.ExecContext(t.Context(), "alter role "+ident(roles.login)+" password '"+loginPassword+"'"); err != nil {
+		t.Fatalf("owner sets the login role's password: %v", err)
+	}
+	loginCfg := cfg.Copy()
+	loginCfg.User, loginCfg.Password = roles.login, loginPassword
+	login := connect(t, loginCfg, dbName)
+
+	t.Run("login role sees nothing by itself", func(t *testing.T) {
+		for _, table := range []string{"users", "categories", "transactions"} {
+			var n int
+			err := login.QueryRowContext(t.Context(), "select count(*) from "+table).Scan(&n) //nolint:gosec // fixed table names
+			var pgErr *pgconn.PgError
+			if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+				t.Errorf("%s as the login role: %v, want permission denied", table, err)
 			}
 		}
 	})
 
 	t.Run("roles, RLS and cascade", func(t *testing.T) {
-		tx, err := db.BeginTx(t.Context(), nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		exec := func(q string, args ...any) {
-			t.Helper()
-			if _, err := tx.ExecContext(t.Context(), q, args...); err != nil {
-				t.Fatalf("%s: %v", q, err)
-			}
-		}
-		newUser := func() string {
-			t.Helper()
-			var id string
-			if err := tx.QueryRowContext(t.Context(),
-				"insert into users (email) values (gen_random_uuid()::text || '@example.test') returning id").Scan(&id); err != nil {
-				t.Fatal(err)
-			}
-			exec("insert into profiles (id) values ($1)", id)
-			return id
-		}
-
-		exec("set local role " + ident(authRole))
-		a, b := newUser(), newUser()
-
-		exec("set local role " + ident(userRole))
-		exec("select set_config('app.user_id', $1, true)", a)
-		if n := count(t, tx, "select count(*) from categories"); n != 13 {
-			t.Errorf("A sees %d categories, want their 13", n)
-		}
-		if n := count(t, tx, "select count(*) from categories where owner_id = $1", b); n != 0 {
-			t.Errorf("A sees %d of B's categories", n)
-		}
-
-		exec("set local role " + ident(authRole))
-		exec("delete from users where id = $1", a)
-		exec("set local role none")
-		if n := count(t, tx, "select count(*) from categories where owner_id = $1", a); n != 0 {
-			t.Errorf("%d categories of the removed user left", n)
-		}
-		if n := count(t, tx, "select count(*) from categories where owner_id = $1", b); n != 13 {
-			t.Errorf("B has %d categories after A was removed, want 13", n)
-		}
+		rlsAndCascade(t, login, roles)
 	})
 
+	// The roles are dropped by down; close the login role's connections first.
+	if err := login.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := m.Down(t.Context()); err != nil {
 		t.Fatalf("down: %v", err)
 	}
 	checkNoLeftovers(t, db, "after down")
-	if n := roleCount(t, shared, userRole, authRole); n != 0 {
-		t.Errorf("after down: %d of the 2 throw-away roles left; down should drop roles no one uses", n)
+	if n := roleCount(t, shared, roles.all()...); n != 0 {
+		t.Errorf("after down: %d of the 3 throw-away roles left; down should drop roles no one uses", n)
 	}
 
 	if _, err := m.Up(t.Context()); err != nil {
 		t.Fatalf("second up: %v", err)
 	}
-	if n := roleCount(t, shared, userRole, authRole); n != 2 {
-		t.Errorf("after second up: %d of the 2 roles exist", n)
+	if n := roleCount(t, shared, roles.all()...); n != 3 {
+		t.Errorf("after second up: %d of the 3 roles exist", n)
 	}
+}
+
+// rlsAndCascade works as the login role, switching roles exactly as WithUserTx and WithAuthTx do.
+func rlsAndCascade(t *testing.T, login *sql.DB, roles testRoles) {
+	t.Helper()
+	tx, err := login.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := tx.ExecContext(t.Context(), q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	newUser := func() string {
+		t.Helper()
+		var id string
+		if err := tx.QueryRowContext(t.Context(),
+			"insert into users (email) values (gen_random_uuid()::text || '@example.test') returning id").Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		exec("insert into profiles (id) values ($1)", id)
+		return id
+	}
+	asUser := func(id string) {
+		t.Helper()
+		exec("set local role " + ident(roles.user))
+		exec("select set_config('app.user_id', $1, true)", id)
+	}
+
+	exec("set local role " + ident(roles.auth))
+	a, b := newUser(), newUser()
+
+	asUser(a)
+	if n := count(t, tx, "select count(*) from categories"); n != 13 {
+		t.Errorf("A sees %d categories, want their 13", n)
+	}
+	if n := count(t, tx, "select count(*) from categories where owner_id = $1", b); n != 0 {
+		t.Errorf("A sees %d of B's categories", n)
+	}
+
+	exec("set local role " + ident(roles.auth))
+	exec("delete from users where id = $1", a)
+	// Seen through RLS: the removed user's categories are gone, B's are untouched.
+	asUser(a)
+	if n := count(t, tx, "select count(*) from categories"); n != 0 {
+		t.Errorf("%d categories of the removed user left", n)
+	}
+	asUser(b)
+	if n := count(t, tx, "select count(*) from categories"); n != 13 {
+		t.Errorf("B has %d categories after A was removed, want 13", n)
+	}
+}
+
+// memberships lists the roles member belongs to, with the membership's options, sorted.
+func memberships(t *testing.T, shared *sql.DB, member string) []string {
+	t.Helper()
+	rows, err := shared.QueryContext(t.Context(), `select m.roleid::regrole::text || ' inherit=' || m.inherit_option
+			|| ' set=' || m.set_option || ' admin=' || m.admin_option
+		from pg_auth_members m where m.member = $1::regrole order by 1`, member)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 // A role that already exists with powers it must not have stops the migration, and the failed
@@ -129,22 +197,27 @@ func TestPreexistingBadRole(t *testing.T) {
 	cfg := dbtest.Config(t)
 
 	for _, tt := range []struct {
-		name, attribute string
+		name      string
+		pick      func(testRoles) string // which role exists beforehand
+		create    string                 // its attributes
+		attribute string                 // what the error must name
 	}{
-		{"bypassrls", "BYPASSRLS"},
-		{"login", "LOGIN"},
+		{"app_user with bypassrls", func(r testRoles) string { return r.user }, "noinherit bypassrls", "BYPASSRLS"},
+		{"app_user with login", func(r testRoles) string { return r.user }, "noinherit login", "LOGIN"},
+		{"app_login with bypassrls", func(r testRoles) string { return r.login }, "noinherit login bypassrls", "BYPASSRLS"},
+		{"app_login without login", func(r testRoles) string { return r.login }, "noinherit nologin", "NOLOGIN"},
+		{"app_login inheriting", func(r testRoles) string { return r.login }, "inherit login", "INHERIT"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			suffix := randomHex(t, 6)
-			userRole, authRole := "t"+suffix+"_user", "t"+suffix+"_auth"
-			throwAwayRoles(t, shared, userRole, authRole)
-			if _, err := shared.ExecContext(t.Context(),
-				"create role "+ident(userRole)+" noinherit "+strings.ToLower(tt.attribute)); err != nil {
+			roles := newTestRoles(t)
+			bad := tt.pick(roles)
+			throwAwayRoles(t, shared, roles.all()...)
+			if _, err := shared.ExecContext(t.Context(), "create role "+ident(bad)+" "+tt.create); err != nil {
 				t.Fatalf("create bad role: %v", err)
 			}
 
 			db := connect(t, cfg, throwAwayDB(t, shared, ""))
-			m, err := migrate.New(db, renamedMigrations(t, userRole, authRole))
+			m, err := migrate.New(db, renamedMigrations(t, roles))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -154,16 +227,21 @@ func TestPreexistingBadRole(t *testing.T) {
 			}
 			var pgErr *pgconn.PgError
 			if !errors.As(err, &pgErr) || pgErr.Code != "P0001" ||
-				!strings.Contains(pgErr.Message, userRole) || !strings.Contains(pgErr.Message, tt.attribute) {
-				t.Errorf("up failed with %v; want the role check naming %s and %s", err, userRole, tt.attribute)
+				!strings.Contains(pgErr.Message, bad) || !strings.Contains(pgErr.Message, tt.attribute) {
+				t.Errorf("up failed with %v; want the role check naming %s and %s", err, bad, tt.attribute)
 			}
 			if len(applied) != 0 {
 				t.Errorf("up reports %d applied migrations", len(applied))
 			}
 
 			checkNoLeftovers(t, db, "after the failed up")
-			if n := roleCount(t, shared, authRole); n != 0 {
-				t.Error("the failed up left the auth role behind")
+			if n := roleCount(t, shared, roles.all()...); n != 1 {
+				t.Errorf("the failed up left %d roles; want only the one that existed before", n)
+			}
+			if bad == roles.login {
+				if got := memberships(t, shared, roles.login); len(got) != 0 {
+					t.Errorf("the failed up left memberships of the login role: %v", got)
+				}
 			}
 			status, err := m.Status(t.Context())
 			if err != nil {

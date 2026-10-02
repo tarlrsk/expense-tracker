@@ -74,10 +74,21 @@ func connect(t *testing.T, cfg *pgx.ConnConfig, database string) *sql.DB {
 	return db
 }
 
+// testRoles are throw-away names for the three roles of the migrations.
+type testRoles struct{ user, auth, login string }
+
+func newTestRoles(t *testing.T) testRoles {
+	t.Helper()
+	p := "t" + randomHex(t, 6)
+	return testRoles{user: p + "_user", auth: p + "_auth", login: p + "_login"}
+}
+
+func (r testRoles) all() []string { return []string{r.user, r.auth, r.login} }
+
 // renamedMigrations copies the migration files into a temporary directory with the roles
-// app_user and app_auth renamed, so a test can create and drop its own roles without touching
-// the server-wide ones other tests use.
-func renamedMigrations(t *testing.T, userRole, authRole string) string {
+// app_user, app_auth and app_login renamed, so a test can create and drop its own roles without
+// touching the server-wide ones other tests use.
+func renamedMigrations(t *testing.T, roles testRoles) string {
 	t.Helper()
 	src, err := dbtest.MigrationsDir()
 	if err != nil {
@@ -88,7 +99,7 @@ func renamedMigrations(t *testing.T, userRole, authRole string) string {
 		t.Fatalf("no migration files in %s: %v", src, err)
 	}
 	dst := t.TempDir()
-	replacer := strings.NewReplacer("app_user", userRole, "app_auth", authRole)
+	replacer := strings.NewReplacer("app_user", roles.user, "app_auth", roles.auth, "app_login", roles.login)
 	for _, f := range files {
 		b, err := os.ReadFile(f) //nolint:gosec // path comes from the repository's migrations directory
 		if err != nil {

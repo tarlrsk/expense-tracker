@@ -8,12 +8,18 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/tarlrsk/expense-tracker/api/internal/config"
+	"github.com/tarlrsk/expense-tracker/api/internal/tx"
 )
 
 // Deps are the shared dependencies built once in app.
+//
+// The auth transactor (tx.Auth) is deliberately not here: app hands it only to the account
+// module's Register (ADR-0032, ADR-0034).
 type Deps struct {
 	Config config.Config
 	Logger *slog.Logger
+	// UserTx opens transactions as app_user (WithUserTx).
+	UserTx tx.User
 }
 
 // Routes are the route groups a module registers its endpoints on.

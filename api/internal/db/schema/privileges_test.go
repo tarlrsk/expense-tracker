@@ -6,8 +6,9 @@ import (
 	"testing"
 )
 
-// grants is the complete, exact set of privileges that app_user, app_auth and PUBLIC hold on the
-// tables, views and sequences of schema public (goose's version table included). Anything not
+// grants is the complete, exact set of privileges that app_user, app_auth, app_login and PUBLIC
+// hold on the tables, views and sequences of schema public (goose's version table included).
+// app_login holds none: it reaches data only after switching to app_user or app_auth. Anything not
 // written here must not exist: a later `grant truncate ...` or `grant all ...` fails the test.
 // Keys are "table" for table-level privileges and "table.column" for column-level ones.
 var grants = map[string]map[string][]string{
@@ -50,11 +51,13 @@ func TestPrivilegeMatrix(t *testing.T) {
 	slices.Sort(want)
 
 	s := begin(t)
-	// Direct grants are all these roles have: neither app role is a member of another role
-	// (TestRoleAttributes), so their rights are their own grants plus PUBLIC's.
+	// Direct grants are all these roles have: app_user and app_auth are members of no role, and
+	// app_login does not inherit from its two (TestMemberships), so their rights are their own
+	// grants plus PUBLIC's.
 	got := s.strings(t, `
 		with grantee(oid, name) as (
-			values (0::oid, 'public'), ('app_user'::regrole::oid, 'app_user'), ('app_auth'::regrole::oid, 'app_auth')
+			values (0::oid, 'public'), ('app_user'::regrole::oid, 'app_user'), ('app_auth'::regrole::oid, 'app_auth'),
+				('app_login'::regrole::oid, 'app_login')
 		), rel as (
 			select oid, relname, relacl from pg_class
 			where relnamespace = 'public'::regnamespace and relkind in ('r', 'p', 'v', 'm', 'S', 'f')
@@ -96,11 +99,13 @@ func TestFunctionGuards(t *testing.T) {
 		}
 	})
 
-	t.Run("app functions closed to public", func(t *testing.T) {
-		open := s.strings(t, `select oid::regprocedure::text from pg_proc
-			where pronamespace = 'app'::regnamespace and has_function_privilege('public', oid, 'EXECUTE')`)
-		if len(open) > 0 {
-			t.Errorf("functions in app executable by PUBLIC: %v", open)
+	t.Run("app functions closed to public and app_login", func(t *testing.T) {
+		for _, role := range []string{"public", "app_login"} {
+			open := s.strings(t, `select oid::regprocedure::text from pg_proc
+				where pronamespace = 'app'::regnamespace and has_function_privilege($1, oid, 'EXECUTE')`, role)
+			if len(open) > 0 {
+				t.Errorf("functions in app executable by %s: %v", role, open)
+			}
 		}
 	})
 
@@ -127,6 +132,9 @@ func TestFunctionGuards(t *testing.T) {
 			{"public", "app", "CREATE", false},
 			{"app_auth", "app", "USAGE", false},
 			{"public", "app", "USAGE", false},
+			{"app_login", "public", "CREATE", false},
+			{"app_login", "app", "CREATE", false},
+			{"app_login", "app", "USAGE", false},
 			{"app_user", "app", "USAGE", true},
 		} {
 			var got bool

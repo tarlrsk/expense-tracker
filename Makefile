@@ -9,10 +9,10 @@ TEST_DATABASE_URL ?= postgres://postgres:postgres@127.0.0.1:5433/expense_test?ss
 MIGRATIONS_DIR := ../db/migrations
 
 .DEFAULT_GOAL := help
-.PHONY: help tools test lint run migrate migrate-status migrate-down web-install web-dev
+.PHONY: help tools test lint run migrate migrate-status migrate-down db-login-password web-install web-dev
 
 help: ## List the targets
-	@grep -E '^[a-z][a-z-]*:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-16s %s\n", $$1, $$2}'
+	@grep -E '^[a-z][a-z-]*:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
 
 tools: ## Install golangci-lint (pinned version, sha256-checked) into GOPATH/bin
 	@set -eu; \
@@ -41,19 +41,19 @@ lint: ## Lint the API, then lint, format-check and type-check the web
 	cd web && $(NPM) run format:check
 	cd web && $(NPM) run typecheck
 
-run: ## Run the API (loads .env if it exists)
+run: ## Run the API as app_login from DATABASE_URL (loads .env if it exists)
 	@set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \
 	cd api && $(GO) run ./cmd/api
 
-migrate: ## Apply all pending migrations to DATABASE_URL (loads .env if it exists)
+migrate: ## Apply all pending migrations as the owner, MIGRATION_DATABASE_URL (loads .env)
 	@set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \
 	cd api && $(GO) run ./cmd/migrate -dir $(MIGRATIONS_DIR) up
 
-migrate-status: ## List the migrations and whether each is applied to DATABASE_URL (loads .env)
+migrate-status: ## List the migrations and whether each is applied (MIGRATION_DATABASE_URL; loads .env)
 	@set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \
 	cd api && $(GO) run ./cmd/migrate -dir $(MIGRATIONS_DIR) status
 
-migrate-down: ## Roll back the latest migration on DATABASE_URL; needs CONFIRM=yes (loads .env)
+migrate-down: ## Roll back the latest migration (MIGRATION_DATABASE_URL); needs CONFIRM=yes (loads .env)
 	@if [ "$(CONFIRM)" != "yes" ]; then \
 		echo "migrate-down rolls back the latest migration and can delete data."; \
 		echo "Run: make migrate-down CONFIRM=yes"; \
@@ -61,6 +61,12 @@ migrate-down: ## Roll back the latest migration on DATABASE_URL; needs CONFIRM=y
 	fi; \
 	set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \
 	cd api && $(GO) run ./cmd/migrate -dir $(MIGRATIONS_DIR) down
+
+# Run once after the first `make migrate`, and again only to change the password: each run
+# replaces it, so the old DATABASE_URL line stops working.
+db-login-password: ## Set a new random password on app_login and print the DATABASE_URL line (loads .env)
+	@set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \
+	cd api && $(GO) run ./cmd/migrate login-password
 
 web-install: ## Install the web dependencies from package-lock.json
 	cd web && $(NPM) ci

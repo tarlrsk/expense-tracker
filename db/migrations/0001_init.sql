@@ -2,9 +2,12 @@
 --
 -- Runs as the database owner role: the Neon owner in development (not a superuser; has
 -- CREATEROLE and BYPASSRLS), the `postgres` superuser in the Docker test database (ADR-0026,
--- ADR-0027). Nothing here runs as `app_user` or `app_auth`.
+-- ADR-0027). Nothing here runs as `app_login`, `app_user` or `app_auth`.
 --
 -- How the API reaches the data (ADR-0019, ADR-0034):
+--   - `app_login`: the role the API logs in as. It owns nothing and has no rights of its own; it
+--     can only switch to the two roles below. A query outside WithUserTx / WithAuthTx therefore
+--     sees nothing. Its password is set once with `make db-login-password`, never here.
 --   - `app_user`: every request on a user's own data, inside WithUserTx
 --     (`SET LOCAL ROLE app_user` + `app.user_id`). Row-level security keeps each user to their rows.
 --   - `app_auth`: login and operator code, inside WithAuthTx. Account tables only; no access at all
@@ -40,8 +43,11 @@ alter default privileges revoke execute on functions from public;
 --    Two databases on the same server may migrate at the same time (for example the test database
 --    and a throw-away one): the loser of that race gets duplicate_object or unique_violation, which
 --    means the role now exists, so it is ignored.
---    Both roles: cannot log in, no superuser, cannot create databases or roles, no BYPASSRLS, and
---    NOINHERIT. The API connects as the owner role and switches with `SET LOCAL ROLE`.
+--    app_user and app_auth: cannot log in, no superuser, cannot create databases or roles, no
+--    BYPASSRLS, and NOINHERIT.
+--    app_login: the same, except that it can log in. It is created without a password, so nobody
+--    can log in as it until `make db-login-password` sets one. The API logs in as app_login and
+--    switches with `SET LOCAL ROLE` inside each transaction.
 ---------------------------------------------------------------------------------------------------
 -- +goose StatementBegin
 do $$
@@ -69,9 +75,49 @@ end
 $$;
 -- +goose StatementEnd
 
+-- +goose StatementBegin
+do $$
+begin
+  if not exists (select from pg_catalog.pg_roles where rolname = 'app_login') then
+    create role app_login login nosuperuser nocreatedb nocreaterole noinherit noreplication nobypassrls;
+  end if;
+exception
+  when duplicate_object or unique_violation then
+    raise notice 'role app_login was created at the same time by another migration; keeping it';
+end
+$$;
+-- +goose StatementEnd
+
+-- app_login may switch to the two roles (SET true) but does not get their rights by default
+-- (INHERIT false), so outside a transaction it can read nothing. It is granted only when missing,
+-- and a membership granted at the same moment by another migration is kept (same race as above).
+-- The owner role is not granted the two roles: only migrations use it, and they never switch.
+-- +goose StatementBegin
+do $$
+declare
+  r text;
+begin
+  foreach r in array array['app_user', 'app_auth'] loop
+    if not exists (select from pg_catalog.pg_auth_members
+                   where roleid = r::regrole and member = 'app_login'::regrole) then
+      begin
+        execute pg_catalog.format('grant %I to app_login with inherit false, set true', r);
+      exception
+        when unique_violation then
+          raise notice 'app_login was granted % at the same time by another migration; keeping it', r;
+      end;
+    end if;
+  end loop;
+end
+$$;
+-- +goose StatementEnd
+
 -- A role that already existed on the server is not trusted blindly: an app_user with BYPASSRLS,
--- for example, would silently void every policy below. Stop the migration if either role can
--- log in, has any special power, inherits, or is a member of another role.
+-- for example, would silently void every policy below. Stop the migration if:
+--   - app_user or app_auth can log in, has any special power, inherits, or is a member of another
+--     role;
+--   - app_login cannot log in, has any special power or inherits, or is a member of anything but
+--     app_user and app_auth, each with SET and without INHERIT or ADMIN.
 -- +goose StatementBegin
 do $$
 declare
@@ -82,18 +128,37 @@ begin
     select oid, rolname, rolcanlogin, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb,
            rolreplication, rolinherit
     from pg_catalog.pg_roles
-    where rolname in ('app_user', 'app_auth')
+    where rolname in ('app_user', 'app_auth', 'app_login')
   loop
-    bad := pg_catalog.concat_ws(', ',
-      case when r.rolcanlogin    then 'LOGIN' end,
-      case when r.rolsuper       then 'SUPERUSER' end,
-      case when r.rolbypassrls   then 'BYPASSRLS' end,
-      case when r.rolcreaterole  then 'CREATEROLE' end,
-      case when r.rolcreatedb    then 'CREATEDB' end,
-      case when r.rolreplication then 'REPLICATION' end,
-      case when r.rolinherit     then 'INHERIT' end,
-      case when exists (select from pg_catalog.pg_auth_members m where m.member = r.oid)
-           then 'member of another role' end);
+    if r.rolname = 'app_login' then
+      bad := pg_catalog.concat_ws(', ',
+        case when not r.rolcanlogin then 'NOLOGIN' end,
+        case when r.rolsuper        then 'SUPERUSER' end,
+        case when r.rolbypassrls    then 'BYPASSRLS' end,
+        case when r.rolcreaterole   then 'CREATEROLE' end,
+        case when r.rolcreatedb     then 'CREATEDB' end,
+        case when r.rolreplication  then 'REPLICATION' end,
+        case when r.rolinherit      then 'INHERIT' end,
+        case when exists (select from pg_catalog.pg_auth_members m
+                          where m.member = r.oid
+                            and (m.roleid not in ('app_user'::regrole, 'app_auth'::regrole)
+                                 or m.inherit_option or not m.set_option or m.admin_option))
+             then 'a membership other than SET on app_user and app_auth' end,
+        case when (select count(distinct m.roleid) from pg_catalog.pg_auth_members m
+                   where m.member = r.oid) <> 2
+             then 'not a member of both app_user and app_auth' end);
+    else
+      bad := pg_catalog.concat_ws(', ',
+        case when r.rolcanlogin    then 'LOGIN' end,
+        case when r.rolsuper       then 'SUPERUSER' end,
+        case when r.rolbypassrls   then 'BYPASSRLS' end,
+        case when r.rolcreaterole  then 'CREATEROLE' end,
+        case when r.rolcreatedb    then 'CREATEDB' end,
+        case when r.rolreplication then 'REPLICATION' end,
+        case when r.rolinherit     then 'INHERIT' end,
+        case when exists (select from pg_catalog.pg_auth_members m where m.member = r.oid)
+             then 'member of another role' end);
+    end if;
     if bad <> '' then
       raise exception 'role % already exists with %; fix or drop the role, then migrate again',
         r.rolname, bad;
@@ -103,10 +168,8 @@ end
 $$;
 -- +goose StatementEnd
 
--- The owner role may switch to the two roles (SET true) but does not get their rights by default
--- (INHERIT false). Nothing is granted the other way: neither role is a member of any other role.
-grant app_user, app_auth to current_user with inherit false, set true;
-
+-- app_login gets nothing else: no grant on any table, no USAGE on schema app, no EXECUTE on any
+-- app function. Everything it can do, it does as app_user or app_auth.
 grant usage on schema app to app_user;
 
 ---------------------------------------------------------------------------------------------------
@@ -379,13 +442,21 @@ alter default privileges grant execute on functions to public;
 -- Every privilege app_user and app_auth had in this database was on an object dropped above, so
 -- none is left here. The roles themselves belong to the whole server: drop each one only if no
 -- other database still uses it, and only if this owner may (it has ADMIN on roles it created);
--- otherwise keep it (and the owner's membership in it).
+-- otherwise keep it.
+-- app_login holds no privilege anywhere, so nothing would stop dropping it even while another
+-- database on the server still needs it. It is dropped only when app_user and app_auth are both
+-- gone, that is when no database uses this set of roles any more.
 -- +goose StatementBegin
 do $$
 declare
   r text;
 begin
-  foreach r in array array['app_user', 'app_auth'] loop
+  foreach r in array array['app_user', 'app_auth', 'app_login'] loop
+    if r = 'app_login' and exists (select from pg_catalog.pg_roles
+                                   where rolname in ('app_user', 'app_auth')) then
+      raise notice 'role app_login is kept: app_user or app_auth is still used in another database';
+      continue;
+    end if;
     begin
       execute pg_catalog.format('drop role if exists %I', r);
     exception

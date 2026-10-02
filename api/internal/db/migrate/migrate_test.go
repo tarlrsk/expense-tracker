@@ -12,8 +12,8 @@ import (
 // Up, down to nothing, and up again, in a throw-away database on the test server.
 //
 // The shared test database is migrated first, so it keeps using app_user and app_auth: the down
-// sections must then leave both roles in place (they belong to the whole server), and tests in
-// other packages running at the same time are not disturbed. The branch where down drops the
+// sections must then leave both roles, and app_login with them, in place (they belong to the
+// whole server), and tests in other packages running at the same time are not disturbed. The branch where down drops the
 // roles is covered by TestNonSuperuserOwner.
 func TestRoundTrip(t *testing.T) {
 	shared := dbtest.DB(t)
@@ -55,8 +55,8 @@ func TestRoundTrip(t *testing.T) {
 	}
 
 	checkNoLeftovers(t, db, "after down")
-	if n := roleCount(t, shared, "app_user", "app_auth"); n != 2 {
-		t.Errorf("after down: %d of the 2 roles left; the shared test database still uses them", n)
+	if n := roleCount(t, shared, "app_user", "app_auth", "app_login"); n != 3 {
+		t.Errorf("after down: %d of the 3 roles left; the shared test database still uses them", n)
 	}
 
 	applied, err = m.Up(ctx)

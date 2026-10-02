@@ -6,6 +6,9 @@
 // per test process; test packages run as parallel processes against the same database, and the
 // migration lock makes that safe. Tests work inside a transaction that is always rolled back, so
 // the shared database stays clean between runs.
+//
+// DB connects as the test superuser (for the schema tests); LoginConfig connects as app_login,
+// the role the API uses, with a fixed password that is set on the test server only.
 package dbtest
 
 import (
@@ -132,6 +135,73 @@ func Config(t testing.TB) *pgx.ConnConfig {
 		t.Fatalf("refusing to connect: %v", err)
 	}
 	return cfg
+}
+
+// LoginRole is the role the API logs in as (made by migration 0001 without a password).
+const LoginRole = "app_login"
+
+// loginTestPassword is the fixed password tests give app_login on the test server only. The real
+// password is set by `make db-login-password` on the development database.
+const loginTestPassword = "app-login-test-only" //nolint:gosec // local Docker test server only
+
+// loginLockKey serialises setting that password across test processes (roles are server-wide).
+const loginLockKey = 0x61707031 // "app1"
+
+var login struct {
+	once sync.Once
+	err  error
+}
+
+// LoginConfig returns the test connection settings logged in as app_login, the role the API
+// uses, on the migrated test database. The first call per process makes sure the role can log
+// in: it tries to, and only when that fails sets the test password, under an advisory lock so
+// parallel test processes do not update the role at the same time. It skips and fails like DB.
+func LoginConfig(t testing.TB) *pgx.ConnConfig {
+	t.Helper()
+	shared := DB(t)
+	cfg := Config(t)
+	cfg.User, cfg.Password = LoginRole, loginTestPassword
+	login.once.Do(func() { login.err = ensureLogin(shared, cfg) })
+	if login.err != nil {
+		t.Fatalf("log in as %s: %v", LoginRole, login.err)
+	}
+	return cfg
+}
+
+func ensureLogin(shared *sql.DB, cfg *pgx.ConnConfig) error {
+	ctx, cancel := context.WithTimeout(context.Background(), migrateTimeout)
+	defer cancel()
+	if canLogIn(ctx, cfg) == nil {
+		return nil
+	}
+	tx, err := shared.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, "select pg_advisory_xact_lock($1)", loginLockKey); err != nil {
+		return fmt.Errorf("lock: %w", err)
+	}
+	// Another process may have set it while this one waited for the lock.
+	if canLogIn(ctx, cfg) != nil {
+		// ALTER ROLE takes no parameters; both parts are constants.
+		q := "alter role " + pgx.Identifier{LoginRole}.Sanitize() + " password '" + loginTestPassword + "'" //nolint:gosec // see above
+		if _, err := tx.ExecContext(ctx, q); err != nil {
+			return fmt.Errorf("set the test password: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return canLogIn(ctx, cfg)
+}
+
+func canLogIn(ctx context.Context, cfg *pgx.ConnConfig) error {
+	conn, err := pgx.ConnectConfig(ctx, cfg.Copy())
+	if err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+	return conn.Close(ctx)
 }
 
 // Tx begins a transaction on db that is always rolled back when the test ends.
