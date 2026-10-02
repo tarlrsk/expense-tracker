@@ -75,6 +75,11 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 		_, _ = fmt.Fprintln(stderr, "migrate: DATABASE_URL is not a valid Postgres connection string")
 		return 1
 	}
+	if host, ok := poolerHost(cfg); ok {
+		_, _ = fmt.Fprintf(stderr, "migrate: host %s is a connection pooler; use the direct host (without -pooler) "+
+			"for migrations (ADR-0026): the migration lock does not work through PgBouncer\n", host)
+		return 1
+	}
 	// Anything printed from here on is scrubbed of the password and the string itself.
 	fail := func(err error) int {
 		_, _ = fmt.Fprintln(stderr, "migrate:", scrub(err.Error(), dsn, cfg.Password))
@@ -99,14 +104,14 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	switch command {
 	case "up":
 		rs, err := m.Up(ctx)
+		for _, r := range rs {
+			_, _ = fmt.Fprintf(stdout, "applied     %s (%s)\n", r.Name, r.Duration.Round(time.Millisecond))
+		}
 		if err != nil {
 			return fail(err)
 		}
 		if len(rs) == 0 {
 			_, _ = fmt.Fprintln(stdout, "up to date, nothing to apply")
-		}
-		for _, r := range rs {
-			_, _ = fmt.Fprintf(stdout, "applied     %s (%s)\n", r.Name, r.Duration.Round(time.Millisecond))
 		}
 	case "down":
 		r, err := m.Down(ctx)
@@ -132,6 +137,20 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 		}
 	}
 	return 0
+}
+
+// poolerHost returns the first host that is a Neon connection pooler (its name contains -pooler).
+func poolerHost(cfg *pgx.ConnConfig) (string, bool) {
+	hosts := []string{cfg.Host}
+	for _, fb := range cfg.Fallbacks {
+		hosts = append(hosts, fb.Host)
+	}
+	for _, h := range hosts {
+		if strings.Contains(strings.ToLower(h), "-pooler") {
+			return h, true
+		}
+	}
+	return "", false
 }
 
 // scrub removes the connection string and the password from msg.

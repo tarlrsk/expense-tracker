@@ -21,6 +21,16 @@ func TestRun(t *testing.T) {
 		{name: "empty DATABASE_URL", args: []string{"status"}, url: "", wantCode: 1, wantErr: "DATABASE_URL is empty"},
 		{name: "invalid DATABASE_URL", args: []string{"up"}, url: "postgres://u:" + secret + "@[bad", wantCode: 1, wantErr: "not a valid"},
 		{
+			name: "neon pooler host", args: []string{"up"},
+			url:      "postgres://owner:" + secret + "@ep-cool-name-123456-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require",
+			wantCode: 1, wantErr: "connection pooler",
+		},
+		{
+			name: "pooler among several hosts", args: []string{"status"},
+			url:      "postgres://owner:" + secret + "@ep-a.aws.neon.tech,ep-a-POOLER.aws.neon.tech/neondb",
+			wantCode: 1, wantErr: "connection pooler",
+		},
+		{
 			// Port 1 refuses at once; the error must not carry the password.
 			name: "unreachable database", args: []string{"status"},
 			url:      "postgres://u:" + secret + "@127.0.0.1:1/x?sslmode=disable&connect_timeout=5",

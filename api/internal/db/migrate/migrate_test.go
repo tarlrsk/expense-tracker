@@ -1,16 +1,9 @@
 package migrate_test
 
 import (
-	"context"
-	"crypto/rand"
-	"database/sql"
-	"encoding/hex"
 	"errors"
 	"path/filepath"
 	"testing"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/tarlrsk/expense-tracker/api/internal/db/dbtest"
 	"github.com/tarlrsk/expense-tracker/api/internal/db/migrate"
@@ -20,7 +13,8 @@ import (
 //
 // The shared test database is migrated first, so it keeps using app_user and app_auth: the down
 // sections must then leave both roles in place (they belong to the whole server), and tests in
-// other packages running at the same time are not disturbed.
+// other packages running at the same time are not disturbed. The branch where down drops the
+// roles is covered by TestNonSuperuserOwner.
 func TestRoundTrip(t *testing.T) {
 	shared := dbtest.DB(t)
 	cfg := dbtest.Config(t)
@@ -33,7 +27,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("no migration files in %s: %v", dir, err)
 	}
 
-	db := throwAwayDB(t, shared, cfg)
+	db := connect(t, cfg, throwAwayDB(t, shared, ""))
 	m, err := migrate.New(db, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -60,21 +54,8 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("down with nothing applied: %v, want ErrNothingToRollBack", err)
 	}
 
-	leftovers := []struct{ what, query string }{
-		{"tables, views or sequences", `select count(*) from pg_class where relnamespace = 'public'::regnamespace
-			and relkind in ('r', 'p', 'v', 'm', 'S', 'f') and relname not in ('goose_db_version', 'goose_db_version_id_seq')`},
-		{"functions", "select count(*) from pg_proc where pronamespace = 'public'::regnamespace"},
-		{"types", `select count(*) from pg_type where typnamespace = 'public'::regnamespace
-			and typname not in ('goose_db_version', '_goose_db_version')`},
-		{"app schema", "select count(*) from pg_namespace where nspname = 'app'"},
-		{"extensions", "select count(*) from pg_extension where extname <> 'plpgsql'"},
-	}
-	for _, l := range leftovers {
-		if n := count(t, db, l.query); n != 0 {
-			t.Errorf("after down: %d %s left", n, l.what)
-		}
-	}
-	if n := count(t, shared, "select count(*) from pg_roles where rolname in ('app_user', 'app_auth')"); n != 2 {
+	checkNoLeftovers(t, db, "after down")
+	if n := roleCount(t, shared, "app_user", "app_auth"); n != 2 {
 		t.Errorf("after down: %d of the 2 roles left; the shared test database still uses them", n)
 	}
 
@@ -94,37 +75,4 @@ func TestRoundTrip(t *testing.T) {
 			t.Errorf("%s not applied after second up", s.Name)
 		}
 	}
-}
-
-// throwAwayDB creates an empty database on the test server, dropped when the test ends.
-func throwAwayDB(t *testing.T, shared *sql.DB, cfg *pgx.ConnConfig) *sql.DB {
-	t.Helper()
-	b := make([]byte, 6)
-	_, _ = rand.Read(b)
-	name := "expense_roundtrip_" + hex.EncodeToString(b)
-	ident := pgx.Identifier{name}.Sanitize()
-
-	// template0 never has connections, so CREATE DATABASE cannot clash with another session.
-	if _, err := shared.ExecContext(t.Context(), "create database "+ident+" template template0"); err != nil {
-		t.Fatalf("create database: %v", err)
-	}
-	cfg.Database = name
-	db := stdlib.OpenDB(*cfg)
-	t.Cleanup(func() {
-		_ = db.Close()
-		ctx := context.WithoutCancel(t.Context())
-		if _, err := shared.ExecContext(ctx, "drop database "+ident+" with (force)"); err != nil {
-			t.Errorf("drop database %s: %v", name, err)
-		}
-	})
-	return db
-}
-
-func count(t *testing.T, db *sql.DB, q string) int {
-	t.Helper()
-	var n int
-	if err := db.QueryRowContext(t.Context(), q).Scan(&n); err != nil {
-		t.Fatalf("%s: %v", q, err)
-	}
-	return n
 }

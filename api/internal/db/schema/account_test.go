@@ -103,7 +103,7 @@ func TestAppAuthDeniedFinancialTables(t *testing.T) {
 	s.run(t, []attempt{
 		{name: "select categories", sql: "select * from categories", wantCode: insufficientPrivilege},
 		{
-			name: "insert categories", sql: "insert into categories (owner_id, name, kind) values ($1, 'x', 'expense')",
+			name: "insert categories", sql: "insert into categories (owner_id, name, kind, sort_order) values ($1, 'x', 'expense', 14)",
 			args: []any{a}, wantCode: insufficientPrivilege,
 		},
 		{name: "update categories", sql: "update categories set name = 'x' where id = $1", args: []any{food}, wantCode: insufficientPrivilege},

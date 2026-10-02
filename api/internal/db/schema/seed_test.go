@@ -29,7 +29,7 @@ func TestDefaultCategories(t *testing.T) {
 	user := s.newUser(t)
 
 	rows, err := s.tx.QueryContext(t.Context(), `
-		select name, kind, icon, archived, uuid_extract_version(id)
+		select name, kind, icon, archived, sort_order, uuid_extract_version(id)
 		from categories where owner_id = $1 order by id`, user)
 	if err != nil {
 		t.Fatal(err)
@@ -39,12 +39,15 @@ func TestDefaultCategories(t *testing.T) {
 	for rows.Next() {
 		var name, kind, icon string
 		var archived bool
-		var version int
-		if err := rows.Scan(&name, &kind, &icon, &archived, &version); err != nil {
+		var sortOrder, version int
+		if err := rows.Scan(&name, &kind, &icon, &archived, &sortOrder, &version); err != nil {
 			t.Fatal(err)
 		}
 		if icon != "" || archived || version != 7 {
 			t.Errorf("%s: icon %q, archived %v, uuid version %d; want empty icon, not archived, version 7", name, icon, archived, version)
+		}
+		if want := len(got) + 1; sortOrder != want {
+			t.Errorf("%s: sort_order %d, want %d", name, sortOrder, want)
 		}
 		got = append(got, struct{ name, kind string }{name, kind})
 	}

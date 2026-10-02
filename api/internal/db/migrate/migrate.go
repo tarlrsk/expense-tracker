@@ -72,15 +72,22 @@ func New(db *sql.DB, dir string) (*Migrator, error) {
 	return &Migrator{provider: p}, nil
 }
 
-// Up applies every pending migration, in order, and returns those it applied.
+// Up applies every pending migration, in order, and returns those it applied. When one fails,
+// it returns the ones applied before it together with the error.
 func (m *Migrator) Up(ctx context.Context) ([]Result, error) {
 	rs, err := m.provider.Up(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("migrate up: %w", err)
+		var partial *goose.PartialError
+		if errors.As(err, &partial) {
+			rs = partial.Applied
+		}
 	}
 	out := make([]Result, 0, len(rs))
 	for _, r := range rs {
 		out = append(out, result(r))
+	}
+	if err != nil {
+		return out, fmt.Errorf("migrate up: %w", err)
 	}
 	return out, nil
 }

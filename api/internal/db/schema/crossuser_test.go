@@ -17,7 +17,7 @@ func TestCategoriesCrossUser(t *testing.T) {
 		{name: "archive A's rows", sql: "update categories set archived = true where owner_id = $1", args: []any{a}, wantRows: 0},
 		{name: "delete A's row", sql: "delete from categories where id = $1", args: []any{foodA}, wantCode: insufficientPrivilege},
 		{
-			name: "insert as A", sql: "insert into categories (owner_id, name, kind) values ($1, 'Sneaky', 'expense')",
+			name: "insert as A", sql: "insert into categories (owner_id, name, kind, sort_order) values ($1, 'Sneaky', 'expense', 14)",
 			args: []any{a}, wantCode: insufficientPrivilege,
 		},
 		{name: "move own row to A", sql: "update categories set owner_id = $1 where id = $2", args: []any{a, foodB}, wantCode: insufficientPrivilege},
@@ -87,7 +87,7 @@ func TestNoUserSeesNothing(t *testing.T) {
 		{name: "update categories", sql: "update categories set icon = 'x'", wantRows: 0},
 		{name: "delete transactions", sql: "delete from transactions", wantRows: 0},
 		{
-			name: "insert category", sql: "insert into categories (owner_id, name, kind) values ($1, 'x', 'expense')",
+			name: "insert category", sql: "insert into categories (owner_id, name, kind, sort_order) values ($1, 'x', 'expense', 14)",
 			args: []any{a}, wantCode: insufficientPrivilege,
 		},
 	}

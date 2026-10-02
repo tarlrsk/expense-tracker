@@ -38,7 +38,8 @@ var LocalHosts = []string{"127.0.0.1", "localhost", "::1"}
 const migrateTimeout = 2 * time.Minute
 
 // ParseLocal parses a test connection string and refuses it unless it points at exactly one
-// local host. The checks run on the configuration that would really be used (pgx also reads
+// local host and at a database whose name contains "test" (so a local port-forward to a real
+// database does not pass). The checks run on the configuration that would really be used (pgx also reads
 // PGHOST and similar variables), plus the raw string for several hosts or a host= parameter.
 // Error messages never quote the connection string.
 func ParseLocal(connString string) (*pgx.ConnConfig, error) {
@@ -63,6 +64,9 @@ func ParseLocal(connString string) (*pgx.ConnConfig, error) {
 	}
 	if !slices.Contains(LocalHosts, hosts[0]) {
 		return nil, fmt.Errorf("%s host %q is not local; allowed: %s", EnvVar, hosts[0], strings.Join(LocalHosts, ", "))
+	}
+	if !strings.Contains(strings.ToLower(cfg.Database), "test") {
+		return nil, fmt.Errorf("%s database %q is not a test database; its name must contain \"test\"", EnvVar, cfg.Database)
 	}
 	return cfg, nil
 }
@@ -92,13 +96,13 @@ func checkRaw(connString string) error {
 // shared is the database of this test process, opened and migrated once.
 var shared struct {
 	once sync.Once
-	cfg  *pgx.ConnConfig
 	db   *sql.DB
 	err  error
 }
 
 // DB returns the migrated test database, shared by the whole test process.
-// It skips the test when TEST_DATABASE_URL is unset and fails it when the URL is not local.
+// Without TEST_DATABASE_URL it fails the test (skips it under -short); it fails it when the URL
+// is not a local test database.
 func DB(t testing.TB) *sql.DB {
 	t.Helper()
 	cfg := Config(t)
@@ -115,9 +119,13 @@ func DB(t testing.TB) *sql.DB {
 // connection (for example to a throw-away database). It skips and fails like DB.
 func Config(t testing.TB) *pgx.ConnConfig {
 	t.Helper()
-	raw, ok := os.LookupEnv(EnvVar)
-	if !ok || raw == "" {
-		t.Skipf("%s is not set; run the database tests with `make test`", EnvVar)
+	raw := os.Getenv(EnvVar)
+	if raw == "" {
+		if testing.Short() {
+			t.Skipf("%s is not set and -short is on: skipping a database test", EnvVar)
+		}
+		t.Fatalf("%s is not set: run `make test` (it starts the test database), "+
+			"or `go test -short ./...` to skip the database tests", EnvVar)
 	}
 	cfg, err := ParseLocal(raw)
 	if err != nil {
