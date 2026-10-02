@@ -2,12 +2,13 @@ GO ?= go
 GOBIN := $(shell $(GO) env GOPATH)/bin
 GOLANGCI_LINT_VERSION := v2.14.0
 GOLANGCI_LINT ?= $(GOBIN)/golangci-lint
+NPM ?= npm
 
 .DEFAULT_GOAL := help
-.PHONY: help tools test lint run
+.PHONY: help tools test lint run web-install web-dev
 
 help: ## List the targets
-	@grep -E '^[a-z][a-z-]*:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-8s %s\n", $$1, $$2}'
+	@grep -E '^[a-z][a-z-]*:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
 tools: ## Install golangci-lint (pinned version, sha256-checked) into GOPATH/bin
 	@set -eu; \
@@ -24,12 +25,24 @@ tools: ## Install golangci-lint (pinned version, sha256-checked) into GOPATH/bin
 	"$(GOBIN)/golangci-lint" version
 
 # Starting postgres-test and applying the migrations is added in PLAN-0002 T3.
-test: ## Run the API tests
+test: ## Run the API tests, then the web tests
 	cd api && $(GO) test ./...
+	cd web && $(NPM) test
 
-lint: ## Run golangci-lint on the API
+lint: ## Lint the API, then lint, format-check and type-check the web
 	cd api && $(GOLANGCI_LINT) run ./...
+	cd web && $(NPM) run lint
+	cd web && $(NPM) run format:check
+	cd web && $(NPM) run typecheck
 
 run: ## Run the API (loads .env if it exists)
 	@set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \
 	cd api && $(GO) run ./cmd/api
+
+web-install: ## Install the web dependencies from package-lock.json
+	cd web && $(NPM) ci
+
+# Only API_ADDR from .env is passed on: the dev server needs nothing else.
+web-dev: ## Run the web dev server (proxies /api to API_ADDR)
+	@if [ -f ./.env ]; then . ./.env; fi; \
+	cd web && API_ADDR="$${API_ADDR:-}" $(NPM) run dev
