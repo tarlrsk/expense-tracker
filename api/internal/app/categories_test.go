@@ -40,8 +40,8 @@ func TestListCategories(t *testing.T) {
 		if c.Name == "Salary" || c.Name == "Other income" {
 			wantKind = "income"
 		}
-		if c.Name != defaultCategoryNames[i] || c.SortOrder != i+1 || c.Kind != wantKind || c.Archived || c.Icon != "" {
-			t.Errorf("category %d = %+v, want %q with sort_order %d", i, c, defaultCategoryNames[i], i+1)
+		if c.Name != defaultCategoryNames[i] || c.SortOrder != i+1 || c.Kind != wantKind || c.Archived || c.Icon != defaultCategoryIcons[i] {
+			t.Errorf("category %d = %+v, want %q %q with sort_order %d", i, c, defaultCategoryNames[i], defaultCategoryIcons[i], i+1)
 		}
 		if c.CreatedAt.IsZero() || c.UpdatedAt.IsZero() || c.ID == uuid.Nil {
 			t.Errorf("category %d has a zero field: %+v", i, c)
@@ -287,7 +287,8 @@ func TestUpdateCategory(t *testing.T) {
 	})
 
 	t.Run("icon set and cleared", func(t *testing.T) {
-		if got := e.mustPatchCategory(tok, food.ID, `{"icon":" 🍜 "}`); got.Icon != "🍜" {
+		// Food is seeded with 🍜 (ADR-0072), so set a different one.
+		if got := e.mustPatchCategory(tok, food.ID, `{"icon":" 🍲 "}`); got.Icon != "🍲" {
 			t.Errorf("icon = %q", got.Icon)
 		}
 		if got := e.mustPatchCategory(tok, food.ID, `{"icon":""}`); got.Icon != "" {

@@ -60,8 +60,8 @@ create trigger categories_set_updated_at before update on categories
 -- The account is created by app_auth, which has no rights on categories (ADR-0034), so this
 -- function runs with the rights of its owner (SECURITY DEFINER). search_path is empty and every
 -- name is fully qualified, so nothing can be slipped in through the search path.
--- sort_order follows the listed order. Icons are chosen later (PLAN-0002 T9). The profile row is
--- created by Go, not here.
+-- sort_order follows the listed order. The icons are emoji, chosen in the design plan (ADR-0072).
+-- The profile row is created by Go, not here.
 -- +goose StatementBegin
 create function app.seed_default_categories() returns trigger
   language plpgsql
@@ -70,19 +70,19 @@ create function app.seed_default_categories() returns trigger
 as $$
 begin
   insert into public.categories (owner_id, name, icon, kind, sort_order) values
-    (new.id, 'Food',                '', 'expense',   1),
-    (new.id, 'Groceries',           '', 'expense',   2),
-    (new.id, 'Transport',           '', 'expense',   3),
-    (new.id, 'Bills & Utilities',   '', 'expense',   4),
-    (new.id, 'Shopping',            '', 'expense',   5),
-    (new.id, 'Health',              '', 'expense',   6),
-    (new.id, 'Education',           '', 'expense',   7),
-    (new.id, 'Family support',      '', 'expense',   8),
-    (new.id, 'Donations / Tamboon', '', 'expense',   9),
-    (new.id, 'Entertainment',       '', 'expense',  10),
-    (new.id, 'Other',               '', 'expense',  11),
-    (new.id, 'Salary',              '', 'income',   12),
-    (new.id, 'Other income',        '', 'income',   13);
+    (new.id, 'Food',                '🍜', 'expense',   1),
+    (new.id, 'Groceries',           '🛒', 'expense',   2),
+    (new.id, 'Transport',           '🚌', 'expense',   3),
+    (new.id, 'Bills & Utilities',   '💡', 'expense',   4),
+    (new.id, 'Shopping',            '🛍️', 'expense',   5),
+    (new.id, 'Health',              '💊', 'expense',   6),
+    (new.id, 'Education',           '🎓', 'expense',   7),
+    (new.id, 'Family support',      '👪', 'expense',   8),
+    (new.id, 'Donations / Tamboon', '🙏', 'expense',   9),
+    (new.id, 'Entertainment',       '🎬', 'expense',  10),
+    (new.id, 'Other',               '📦', 'expense',  11),
+    (new.id, 'Salary',              '💼', 'income',   12),
+    (new.id, 'Other income',        '💰', 'income',   13);
   return null;
 end
 $$;

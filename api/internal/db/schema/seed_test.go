@@ -6,22 +6,23 @@ import (
 )
 
 // Creating an account as app_auth seeds the default categories through the trigger
-// (ADR-0036), although app_auth has no rights on categories.
+// (ADR-0036), although app_auth has no rights on categories. The icons are the emoji of the
+// design plan (ADR-0072).
 func TestDefaultCategories(t *testing.T) {
-	want := []struct{ name, kind string }{
-		{"Food", "expense"},
-		{"Groceries", "expense"},
-		{"Transport", "expense"},
-		{"Bills & Utilities", "expense"},
-		{"Shopping", "expense"},
-		{"Health", "expense"},
-		{"Education", "expense"},
-		{"Family support", "expense"},
-		{"Donations / Tamboon", "expense"},
-		{"Entertainment", "expense"},
-		{"Other", "expense"},
-		{"Salary", "income"},
-		{"Other income", "income"},
+	want := []struct{ name, kind, icon string }{
+		{"Food", "expense", "🍜"},
+		{"Groceries", "expense", "🛒"},
+		{"Transport", "expense", "🚌"},
+		{"Bills & Utilities", "expense", "💡"},
+		{"Shopping", "expense", "🛍️"},
+		{"Health", "expense", "💊"},
+		{"Education", "expense", "🎓"},
+		{"Family support", "expense", "👪"},
+		{"Donations / Tamboon", "expense", "🙏"},
+		{"Entertainment", "expense", "🎬"},
+		{"Other", "expense", "📦"},
+		{"Salary", "income", "💼"},
+		{"Other income", "income", "💰"},
 	}
 
 	s := begin(t)
@@ -35,7 +36,7 @@ func TestDefaultCategories(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = rows.Close() }()
-	var got []struct{ name, kind string }
+	var got []struct{ name, kind, icon string }
 	for rows.Next() {
 		var name, kind, icon string
 		var archived bool
@@ -43,13 +44,13 @@ func TestDefaultCategories(t *testing.T) {
 		if err := rows.Scan(&name, &kind, &icon, &archived, &sortOrder, &version); err != nil {
 			t.Fatal(err)
 		}
-		if icon != "" || archived || version != 7 {
-			t.Errorf("%s: icon %q, archived %v, uuid version %d; want empty icon, not archived, version 7", name, icon, archived, version)
+		if archived || version != 7 {
+			t.Errorf("%s: archived %v, uuid version %d; want not archived, version 7", name, archived, version)
 		}
 		if want := len(got) + 1; sortOrder != want {
 			t.Errorf("%s: sort_order %d, want %d", name, sortOrder, want)
 		}
-		got = append(got, struct{ name, kind string }{name, kind})
+		got = append(got, struct{ name, kind, icon string }{name, kind, icon})
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)

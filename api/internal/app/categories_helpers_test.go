@@ -21,6 +21,11 @@ var defaultCategoryNames = []string{
 	"Family support", "Donations / Tamboon", "Entertainment", "Other", "Salary", "Other income",
 }
 
+// defaultCategoryIcons are the seeded icons, in the same order (ADR-0072).
+var defaultCategoryIcons = []string{
+	"🍜", "🛒", "🚌", "💡", "🛍️", "💊", "🎓", "👪", "🙏", "🎬", "📦", "💼", "💰",
+}
+
 // categoryItemKeys are exactly the keys of a category in a response.
 var categoryItemKeys = []string{"id", "name", "icon", "kind", "archived", "sort_order", "created_at", "updated_at"}
 
