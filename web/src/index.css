@@ -4,26 +4,29 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* --font-sans stays Tailwind's system font stack until the design plan (ADR-0054). */
+/*
+ * Design plan (ADR-0072). Light theme only: no `.dark` class is ever set, and `color-scheme`
+ * keeps form controls light on a phone in dark mode. IBM Plex Sans Thai is shipped inside the
+ * app (src/fonts.css); no font host is contacted.
+ *
+ * Type scale, four sizes: text-sm 14px (meta, bar labels), text-base 16px (body, inputs),
+ * text-xl 20px (titles), text-display 28px (page titles, large amounts). Two weights: 400, 600.
+ */
+@theme {
+  --font-sans: 'IBM Plex Sans Thai', ui-sans-serif, system-ui, sans-serif;
+  --text-display: 1.75rem;
+  --text-display--line-height: 1.2;
+}
+
 @theme inline {
   --font-heading: var(--font-sans);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
+  --color-brass: var(--brass);
+  --color-income: var(--income);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -47,73 +50,46 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/*
+ * Colours (ADR-0072), mapped onto the shadcn variables. Contrast on paper, WCAG:
+ * ink 15.3:1, muted text 5.5:1, green 5.1:1 (white on green 5.3:1), red 5.3:1 (white on red
+ * 5.5:1), brass 4.7:1. The plan's brass #B8862B gave only 3.1:1 for the satang digits, so it is
+ * darkened to #926B22. Muted text, borders and surfaces are mixes of ink into paper.
+ */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
+  color-scheme: light;
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --paper: #fafbfa;
+  --ink: #12261f;
+  --green: #1f7a54;
+  --brass: #926b22;
+  --red: #c2362b;
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: #ffffff;
+  --card-foreground: var(--ink);
+  --popover: #ffffff;
+  --popover-foreground: var(--ink);
+  --primary: var(--green);
+  --primary-foreground: #ffffff;
+  /* ink 5% into paper */
+  --secondary: #eef0ef;
+  --secondary-foreground: var(--ink);
+  --muted: #eef0ef;
+  /* ink 68% into paper */
+  --muted-foreground: #5c6a65;
+  --accent: #eef0ef;
+  --accent-foreground: var(--ink);
+  --destructive: var(--red);
+  --destructive-foreground: #ffffff;
+  /* ink 12% into paper: dividers */
+  --border: #dee1e0;
+  /* ink 50% into paper: input outlines, 3.2:1 */
+  --input: #86908c;
+  --ring: var(--green);
+  --income: var(--green);
+  --radius: 0.625rem;
 }
 
 @layer base {
@@ -125,6 +101,16 @@
   }
   html {
     @apply font-sans;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  /* No double-tap zoom delay on controls. */
+  a,
+  button,
+  [role='button'],
+  label {
+    touch-action: manipulation;
   }
 }
 /* Phone-first base (ADR-0050). */

@@ -7,8 +7,10 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
-// Matches the default shadcn theme (--background in src/index.css).
-const themeColor = '#ffffff'
+// Design plan colours (ADR-0072; --paper and --green in src/index.css): the browser and
+// status bar in banknote green, the splash screen in paper.
+const themeColor = '#1f7a54'
+const backgroundColor = '#fafbfa'
 
 // The Go API the dev server proxies /api to. API_ADDR is the API's own
 // listen address (host:port); the Makefile passes it in from .env.
@@ -40,7 +42,7 @@ export default defineConfig({
         scope: '/',
         display: 'standalone',
         theme_color: themeColor,
-        background_color: themeColor,
+        background_color: backgroundColor,
         icons: [
           { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
           { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' },
@@ -76,7 +78,9 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'node',
-    include: ['src/**/*.test.ts'],
+    // jsdom for components and localStorage; Testing Library matchers and cleanup in setup.
+    environment: 'jsdom',
+    include: ['src/**/*.test.{ts,tsx}'],
+    setupFiles: ['src/test/setup.ts'],
   },
 })

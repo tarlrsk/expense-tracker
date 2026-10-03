@@ -1,0 +1,32 @@
+export const settings = {
+  title: 'Settings',
+  email: 'Email',
+  displayName: 'Display name',
+  displayNameHint: 'Optional, up to 50 characters.',
+  displayNameTooLong: 'Use at most 50 characters.',
+  saveName: 'Save name',
+  savingName: 'Saving…',
+  nameSaved: 'Name saved.',
+  changePassword: 'Change password',
+  admin: 'Admin',
+  adminHint: 'Invite people and manage accounts',
+  logOut: 'Log out',
+  loggingOut: 'Logging out…',
+  deleteAccount: 'Delete account',
+  loadError: 'Your account could not be loaded.',
+
+  changePasswordTitle: 'Change password',
+  changePasswordIntro: 'You stay logged in here. Your other devices are logged out.',
+  currentPassword: 'Current password',
+  newPassword: 'New password',
+  savePassword: 'Save password',
+  savingPassword: 'Saving…',
+  passwordChanged: 'Password changed. Your other devices were logged out.',
+
+  deleteTitle: 'Delete your account?',
+  deleteWarning:
+    'This permanently deletes your account and all your data: every expense, income and category. It cannot be undone.',
+  deletePassword: 'Your password',
+  deleteSubmit: 'Delete account',
+  deleting: 'Deleting…',
+} as const

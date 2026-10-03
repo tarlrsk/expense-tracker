@@ -21,6 +21,16 @@ export default defineConfig([
       pluginQuery.configs['flat/recommended'],
       pluginRouter.configs['flat/recommended'],
     ],
+    rules: {
+      // TanStack Router's redirect() is thrown by design (ADR-0030).
+      '@typescript-eslint/only-throw-error': [
+        'error',
+        {
+          allow: [{ from: 'package', package: '@tanstack/router-core', name: 'Redirect' }],
+          allowRethrowing: true,
+        },
+      ],
+    },
     languageOptions: {
       ecmaVersion: 2023,
       globals: globals.browser,

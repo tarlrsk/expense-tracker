@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, apiRequest, serverErrorCodes, setTokenProvider } from './client'
+import {
+  ApiError,
+  ResponseShapeError,
+  apiRequest,
+  serverErrorCodes,
+  setTokenProvider,
+  setUnauthenticatedHandler,
+} from './client'
 import type { ApiErrorCode } from './client'
 import { getHealth } from './health'
 
@@ -37,11 +44,13 @@ beforeEach(() => {
   fetchMock.mockReset()
   vi.stubGlobal('fetch', fetchMock)
   setTokenProvider(null)
+  setUnauthenticatedHandler(null)
 })
 
 afterEach(() => {
   vi.unstubAllGlobals()
   setTokenProvider(null)
+  setUnauthenticatedHandler(null)
 })
 
 describe('apiRequest', () => {
@@ -209,5 +218,79 @@ describe('apiRequest errors', () => {
       expect(err.message).not.toContain(token)
       expect(err.message).not.toContain(body.password)
     }
+  })
+})
+
+describe('public calls and the end of a session', () => {
+  it('sends no bearer header on a public call, even with a token', async () => {
+    setTokenProvider(() => 'tok-123')
+    fetchMock.mockResolvedValue(jsonResponse(200, { status: 'ok' }))
+
+    await apiRequest('/auth/login', { method: 'POST', body: {}, auth: false })
+
+    expect(lastCall().headers.has('Authorization')).toBe(false)
+  })
+
+  it('calls the unauthenticated handler on a 401 to an authed call', async () => {
+    const handler = vi.fn()
+    setUnauthenticatedHandler(handler)
+    setTokenProvider(() => 'tok-old')
+    fetchMock.mockResolvedValue(
+      jsonResponse(401, { error: { code: 'unauthenticated', message: 'log in to continue' } }),
+    )
+
+    const err = await catchApiError(apiRequest('/me'))
+
+    expect(err.code).toBe('unauthenticated')
+    expect(handler).toHaveBeenCalledOnce()
+  })
+
+  it.each<{ name: string; status: number; code: string; auth: boolean }>([
+    {
+      name: 'a 401 to a public call (failed login)',
+      status: 401,
+      code: 'unauthenticated',
+      auth: false,
+    },
+    { name: 'a 403', status: 403, code: 'forbidden', auth: true },
+    { name: 'a 400', status: 400, code: 'invalid_input', auth: true },
+  ])('does not end the session on $name', async ({ status, code, auth }) => {
+    const handler = vi.fn()
+    setUnauthenticatedHandler(handler)
+    setTokenProvider(() => 'tok-123')
+    fetchMock.mockResolvedValue(jsonResponse(status, { error: { code, message: 'no' } }))
+
+    await catchApiError(apiRequest('/x', { auth }))
+
+    expect(handler).not.toHaveBeenCalled()
+  })
+})
+
+describe('response parsing', () => {
+  const parseName = (body: unknown): { name: string } => {
+    if (
+      typeof body === 'object' &&
+      body !== null &&
+      'name' in body &&
+      typeof body.name === 'string'
+    ) {
+      return { name: body.name }
+    }
+    throw new ResponseShapeError('no name')
+  }
+
+  it('returns what the parser returns', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { name: 'Food', extra: 1 }))
+
+    await expect(apiRequest('/x', { parse: parseName })).resolves.toEqual({ name: 'Food' })
+  })
+
+  it('maps a shape error to bad_response with the status', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(201, { title: 'Food' }))
+
+    const err = await catchApiError(apiRequest('/x', { parse: parseName }))
+
+    expect(err.code).toBe<ApiErrorCode>('bad_response')
+    expect(err.status).toBe(201)
   })
 })

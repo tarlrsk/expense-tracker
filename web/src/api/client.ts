@@ -44,13 +44,36 @@ export function setTokenProvider(provider: TokenProvider | null): void {
   tokenProvider = provider ?? (() => null)
 }
 
+let unauthenticatedHandler: (() => void) | null = null
+
+/**
+ * Sets what happens when an authed call gets a 401 `unauthenticated` answer: the session is
+ * over (ADR-0037). Public calls (`auth: false`) never trigger it, so a failed login is only an
+ * error. null removes it.
+ */
+export function setUnauthenticatedHandler(handler: (() => void) | null): void {
+  unauthenticatedHandler = handler
+}
+
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
-export interface RequestOptions {
+export interface RequestOptions<T = unknown> {
   method?: HttpMethod
   /** Sent as JSON. */
   body?: unknown
   signal?: AbortSignal
+  /** false for the public endpoints (log in, set password): no bearer token is sent. */
+  auth?: boolean
+  /**
+   * Checks the shape of a JSON body and returns it typed; it throws ResponseShapeError when
+   * the body is not what the app depends on, which becomes a `bad_response` ApiError.
+   */
+  parse?: (body: unknown) => T
+}
+
+/** Thrown by a `parse` function when a response body has the wrong shape. */
+export class ResponseShapeError extends Error {
+  override readonly name = 'ResponseShapeError'
 }
 
 const basePath = '/api'
@@ -60,11 +83,11 @@ const basePath = '/api'
  * Throws ApiError for any failure except an aborted request, whose AbortError
  * is passed through unchanged.
  */
-export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, signal } = options
+export async function apiRequest<T>(path: string, options: RequestOptions<T> = {}): Promise<T> {
+  const { method = 'GET', body, signal, auth = true, parse } = options
 
   const headers = new Headers({ Accept: 'application/json' })
-  const token = tokenProvider()
+  const token = auth ? tokenProvider() : null
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
@@ -85,19 +108,35 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 
   if (!response.ok) {
-    throw await errorFromResponse(response)
+    const err = await errorFromResponse(response)
+    if (auth && err.code === 'unauthenticated') {
+      unauthenticatedHandler?.()
+    }
+    throw err
   }
   if (response.status === 204) {
     return undefined as T
   }
 
+  let parsed: unknown
   try {
-    return (await response.json()) as T
+    parsed = await response.json()
   } catch (err) {
     if (isAbortError(err)) {
       throw err
     }
     throw badResponse(response.status, err)
+  }
+  if (!parse) {
+    return parsed as T
+  }
+  try {
+    return parse(parsed)
+  } catch (err) {
+    if (err instanceof ResponseShapeError) {
+      throw badResponse(response.status, err)
+    }
+    throw err
   }
 }
 
