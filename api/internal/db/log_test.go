@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -200,4 +201,111 @@ func TestValueFree(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A statement that fails on a unique key is an expected conflict (a 409): it is logged at info
+// level as "SQL conflict", value-free, and never at error level. Every other database error,
+// including other integrity violations, is still an error line (ADR-0070).
+func TestUniqueConflictLoggedAtInfo(t *testing.T) {
+	const takenName = "Private Name qxvz"
+	tests := []struct {
+		name      string
+		stmt      func(ctx context.Context) error
+		wantState string
+		wantLevel string
+		wantMsg   string
+		wantSQL   string
+	}{
+		{
+			name: "unique violation through Exec", wantState: "23505", wantLevel: "INFO", wantMsg: conflictMessage,
+			stmt: func(ctx context.Context) error {
+				c, err := UserConn(ctx)
+				if err != nil {
+					return err
+				}
+				return Err(c.Exec("update categories set name = ? where sort_order = 1", strings.ToUpper(takenName)))
+			},
+			wantSQL: "update categories set name = $1 where sort_order = 1",
+		},
+		{
+			name: "unique violation through Raw and Scan", wantState: "23505", wantLevel: "INFO", wantMsg: conflictMessage,
+			stmt: func(ctx context.Context) error {
+				c, err := UserConn(ctx)
+				if err != nil {
+					return err
+				}
+				var id string
+				return Err(c.Raw("update categories set name = ? where sort_order = 3 returning id", strings.ToLower(takenName)).Scan(&id))
+			},
+			wantSQL: "update categories set name = $1 where sort_order = 3 returning id",
+		},
+		{
+			name: "check violation stays an error", wantState: "23514", wantLevel: "ERROR", wantMsg: "SQL executed",
+			stmt: func(ctx context.Context) error {
+				c, err := UserConn(ctx)
+				if err != nil {
+					return err
+				}
+				return Err(c.Exec("update categories set name = ? where sort_order = 1", " "+takenName))
+			},
+			wantSQL: "update categories set name = $1 where sort_order = 1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out syncBuffer
+			d := testDB(t, func(c *Config) {
+				c.Logger = slog.New(slog.NewJSONHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			})
+			user := newUser(t, d)
+			if err := d.WithUserTx(t.Context(), user, func(ctx context.Context) error {
+				c, err := UserConn(ctx)
+				if err != nil {
+					return err
+				}
+				return Err(c.Exec("update categories set name = ? where sort_order = 2", takenName))
+			}); err != nil {
+				t.Fatalf("set up the taken name: %v", err)
+			}
+
+			err := d.WithUserTx(t.Context(), user, tt.stmt)
+			var pgErr *PgError
+			if !errors.As(err, &pgErr) || pgErr.Code != tt.wantState {
+				t.Fatalf("error = %v, want SQLSTATE %s", err, tt.wantState)
+			}
+
+			lines := logLines(t, out.String())
+			if len(lines) != 1 {
+				t.Fatalf("log lines = %d, want 1:\n%s", len(lines), out.String())
+			}
+			line := lines[0]
+			trace, _ := line["trace"].(map[string]any)
+			if line["level"] != tt.wantLevel || line["msg"] != tt.wantMsg || trace["sql"] != tt.wantSQL {
+				t.Errorf("line = %v, want level %s, msg %q, sql %q", line, tt.wantLevel, tt.wantMsg, tt.wantSQL)
+			}
+			if errText, _ := trace["error"].(string); !strings.Contains(errText, "SQLSTATE "+tt.wantState) {
+				t.Errorf("trace error = %q, want SQLSTATE %s", errText, tt.wantState)
+			}
+			if tt.wantState == "23505" && !strings.Contains(out.String(), "categories_owner_name_idx") {
+				t.Errorf("the conflict line does not name the constraint:\n%s", out.String())
+			}
+			if log := strings.ToLower(out.String()); strings.Contains(log, "qxvz") || strings.Contains(log, user.String()) {
+				t.Errorf("log contains a value:\n%s", out.String())
+			}
+		})
+	}
+}
+
+// logLines decodes a JSON log, one object per line.
+func logLines(t *testing.T, log string) []map[string]any {
+	t.Helper()
+	var lines []map[string]any
+	for line := range strings.Lines(log) {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("decode log line %q: %v", line, err)
+		}
+		lines = append(lines, m)
+	}
+	return lines
 }

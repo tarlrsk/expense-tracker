@@ -19,20 +19,27 @@ import (
 )
 
 // newLogger returns GORM's slog logger set to log failed statements (error level) and statements
-// slower than slow (warn level), never successful ones. Statements are logged with their
-// placeholders ($1, $2 ...) and never with parameter values: amounts and merchant names are
-// private. Errors are logged only in a value-free form (valueFree): a Postgres error message can
-// quote a value (invalid input syntax for type uuid: "..."), and so can a scan error.
+// slower than slow (warn level), never successful ones. A statement that fails on a unique key
+// (SQLSTATE 23505) is an expected conflict, answered with a clean 409, and is logged at info level
+// as "SQL conflict" instead (ADR-0070). Statements are logged with their placeholders ($1, $2 ...)
+// and never with parameter values: amounts and merchant names are private. Errors are logged only
+// in a value-free form (valueFree): a Postgres error message can quote a value (invalid input
+// syntax for type uuid: "..."), and so can a scan error.
 func newLogger(logger *slog.Logger, slow time.Duration) gormlogger.Interface {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	return valueFreeLogger{gormlogger.NewSlogLogger(logger, gormlogger.Config{
-		SlowThreshold:             slow,
-		IgnoreRecordNotFoundError: true,
-		ParameterizedQueries:      true,
-		LogLevel:                  gormlogger.Warn,
-	})}
+	const level = gormlogger.Warn
+	return valueFreeLogger{
+		Interface: gormlogger.NewSlogLogger(logger, gormlogger.Config{
+			SlowThreshold:             slow,
+			IgnoreRecordNotFoundError: true,
+			ParameterizedQueries:      true,
+			LogLevel:                  level,
+		}),
+		logger: logger,
+		level:  level,
+	}
 }
 
 // GORM's Scan logs through a separate recorder that ignores the logger's ParamsFilter and asks
@@ -48,9 +55,13 @@ func init() {
 // in ($1$); Trace turns it back into $1.
 var explainedPlaceholder = regexp.MustCompile(`\$(\d+)\$`)
 
-// valueFreeLogger wraps GORM's slog logger and logs every error in its value-free form.
+// valueFreeLogger wraps GORM's slog logger and logs every error in its value-free form, and a
+// unique-key conflict at info level (ADR-0070).
 type valueFreeLogger struct {
 	gormlogger.Interface
+	// logger and level are the wrapped logger's own, for the conflict line it cannot write.
+	logger *slog.Logger
+	level  gormlogger.LogLevel
 }
 
 // paramsFilter is GORM's ParamsFilter interface (gorm.ParamsFilter): GORM asks the logger which
@@ -60,14 +71,45 @@ type paramsFilter interface {
 }
 
 func (l valueFreeLogger) LogMode(level gormlogger.LogLevel) gormlogger.Interface {
-	return valueFreeLogger{l.Interface.LogMode(level)}
+	return valueFreeLogger{Interface: l.Interface.LogMode(level), logger: l.logger, level: level}
 }
 
 func (l valueFreeLogger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
-	l.Interface.Trace(ctx, begin, func() (string, int64) {
+	placeholders := func() (string, int64) {
 		sql, rows := fc()
 		return explainedPlaceholder.ReplaceAllString(sql, "$$$1"), rows
-	}, valueFree(err))
+	}
+	err = valueFree(err)
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		l.traceConflict(ctx, begin, placeholders, err)
+		return
+	}
+	l.Interface.Trace(ctx, begin, placeholders, err)
+}
+
+// conflictMessage is the message of the info line for a statement that failed on a unique key.
+const conflictMessage = "SQL conflict"
+
+// traceConflict logs a statement that failed on a unique key (err is value-free and matches
+// gorm.ErrDuplicatedKey) at info level, with the same fields GORM's error line has: the duration,
+// the statement with placeholders, the rows and the error (SQLSTATE and constraint name when the
+// driver's error reached the logger, GORM's fixed "duplicated key" text when GORM translated it).
+// It is written whenever the error line would have been (ADR-0070).
+func (l valueFreeLogger) traceConflict(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
+	if l.level < gormlogger.Error || !l.logger.Enabled(ctx, slog.LevelInfo) {
+		return
+	}
+	elapsed := time.Since(begin)
+	sql, rows := fc()
+	fields := []slog.Attr{
+		slog.String("duration", fmt.Sprintf("%.3fms", float64(elapsed.Nanoseconds())/1e6)),
+		slog.String("sql", sql),
+	}
+	if rows != -1 {
+		fields = append(fields, slog.Int64("rows", rows))
+	}
+	fields = append(fields, slog.String("error", err.Error()))
+	l.logger.LogAttrs(ctx, slog.LevelInfo, conflictMessage, slog.Attr{Key: "trace", Value: slog.GroupValue(fields...)})
 }
 
 // ParamsFilter never lets a parameter value into the log, whatever the wrapped logger says.
