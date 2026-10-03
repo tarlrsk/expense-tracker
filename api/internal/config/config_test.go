@@ -11,13 +11,19 @@ import (
 const testURL = "postgres://app_login:pw-secret-123@db.example.com/app?sslmode=require" //nolint:gosec // fake credentials
 
 // settings are every variable Load reads.
-var settings = []string{"API_ADDR", "REQUEST_TIMEOUT", "LOG_LEVEL", "DATABASE_URL", "DB_STATEMENT_TIMEOUT", "DB_MAX_OPEN_CONNS"}
+var settings = []string{
+	"API_ADDR", "REQUEST_TIMEOUT", "LOG_LEVEL", "DATABASE_URL", "DB_STATEMENT_TIMEOUT", "DB_MAX_OPEN_CONNS",
+	"SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_TLS",
+}
+
+const smtpPassword = "smtp-secret-456" //nolint:gosec // fake credentials
 
 func TestLoad(t *testing.T) {
 	// defaults is the result with only DATABASE_URL set.
 	defaults := Config{
 		Addr: "127.0.0.1:8080", RequestTimeout: 50 * time.Second, LogLevel: slog.LevelInfo,
 		DatabaseURL: testURL, DBStatementTimeout: 20 * time.Second, DBMaxOpenConns: 10,
+		SMTP: SMTP{Host: "127.0.0.1", Port: 1025, From: "Satang <noreply@localhost>", TLS: SMTPTLSNone},
 	}
 	with := func(change func(*Config)) Config {
 		c := defaults
@@ -79,6 +85,41 @@ func TestLoad(t *testing.T) {
 			name: "statement timeout over a shorter request timeout", env: env("REQUEST_TIMEOUT", "10s", "DB_STATEMENT_TIMEOUT", "20s"),
 			wantErr: "less than REQUEST_TIMEOUT",
 		},
+		{
+			name: "smtp all set",
+			env: env("SMTP_HOST", "smtp.example.com", "SMTP_PORT", "587", "SMTP_USERNAME", "mailer",
+				"SMTP_PASSWORD", smtpPassword, "SMTP_FROM", "noreply@example.com", "SMTP_TLS", "starttls"),
+			want: with(func(c *Config) {
+				c.SMTP = SMTP{
+					Host: "smtp.example.com", Port: 587, Username: "mailer", Password: smtpPassword,
+					From: "noreply@example.com", TLS: SMTPTLSStartTLS,
+				}
+			}),
+		},
+		{
+			name: "smtp implicit tls",
+			env:  env("SMTP_PORT", "465", "SMTP_TLS", "tls"),
+			want: with(func(c *Config) { c.SMTP.Port, c.SMTP.TLS = 465, SMTPTLSImplicit }),
+		},
+		{name: "smtp port zero", env: env("SMTP_PORT", "0"), wantErr: "SMTP_PORT"},
+		{name: "smtp port too big", env: env("SMTP_PORT", "65536"), wantErr: "SMTP_PORT"},
+		{name: "smtp port not a number", env: env("SMTP_PORT", "smtp"), wantErr: "SMTP_PORT"},
+		{name: "smtp from not an address", env: env("SMTP_FROM", "nobody"), wantErr: "SMTP_FROM"},
+		{name: "smtp opportunistic tls", env: env("SMTP_TLS", "opportunistic"), wantErr: "SMTP_TLS"},
+		{name: "smtp upper-case tls", env: env("SMTP_TLS", "STARTTLS"), wantErr: "SMTP_TLS"},
+		{
+			name:    "smtp credentials over a clear connection",
+			env:     env("SMTP_USERNAME", "mailer", "SMTP_PASSWORD", smtpPassword),
+			wantErr: "must not go over a clear connection",
+		},
+		{
+			name: "smtp username without password", env: env("SMTP_USERNAME", "mailer", "SMTP_TLS", "tls"),
+			wantErr: "set both or neither",
+		},
+		{
+			name: "smtp password without username", env: env("SMTP_PASSWORD", smtpPassword, "SMTP_TLS", "tls"),
+			wantErr: "set both or neither",
+		},
 		{name: "pool size zero", env: env("DB_MAX_OPEN_CONNS", "0"), wantErr: "DB_MAX_OPEN_CONNS"},
 		{name: "pool size not a number", env: env("DB_MAX_OPEN_CONNS", "ten"), wantErr: "DB_MAX_OPEN_CONNS"},
 	}
@@ -95,8 +136,8 @@ func TestLoad(t *testing.T) {
 				if !strings.Contains(err.Error(), tt.wantErr) {
 					t.Errorf("error = %v, want it to mention %q", err, tt.wantErr)
 				}
-				if strings.Contains(err.Error(), "pw-secret-123") {
-					t.Errorf("error leaks DATABASE_URL: %v", err)
+				if strings.Contains(err.Error(), "pw-secret-123") || strings.Contains(err.Error(), smtpPassword) {
+					t.Errorf("error leaks a secret: %v", err)
 				}
 				return
 			}
@@ -110,16 +151,16 @@ func TestLoad(t *testing.T) {
 	}
 }
 
-// The database URL never shows in printed or logged config.
+// The database URL and the SMTP password never show in printed or logged config.
 func TestSecretIsHidden(t *testing.T) {
-	cfg := Config{DatabaseURL: testURL}
+	cfg := Config{DatabaseURL: testURL, SMTP: SMTP{Password: smtpPassword}}
 	var log strings.Builder
 	slog.New(slog.NewTextHandler(&log, nil)).Info("config", slog.Any("cfg", cfg), slog.Any("url", cfg.DatabaseURL))
 	for _, out := range []string{
 		fmt.Sprintf("%v", cfg), fmt.Sprintf("%+v", cfg), fmt.Sprintf("%#v", cfg), fmt.Sprintf("url=%s", cfg.DatabaseURL),
-		log.String(),
+		fmt.Sprintf("%+v", cfg.SMTP), log.String(),
 	} {
-		if strings.Contains(out, "pw-secret-123") {
+		if strings.Contains(out, "pw-secret-123") || strings.Contains(out, smtpPassword) {
 			t.Errorf("secret printed: %s", out)
 		}
 	}

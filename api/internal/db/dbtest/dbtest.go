@@ -16,10 +16,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -166,6 +168,21 @@ func LoginConfig(t testing.TB) *pgx.ConnConfig {
 		t.Fatalf("log in as %s: %v", LoginRole, login.err)
 	}
 	return cfg
+}
+
+// LoginURL is LoginConfig as a connection string, for tests that open the database the way the
+// API does (db.Open with DATABASE_URL). It skips and fails like DB.
+func LoginURL(t testing.TB) string {
+	t.Helper()
+	cfg := LoginConfig(t)
+	u := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(cfg.User, cfg.Password),
+		Host:     net.JoinHostPort(cfg.Host, strconv.Itoa(int(cfg.Port))),
+		Path:     "/" + cfg.Database,
+		RawQuery: "sslmode=disable",
+	}
+	return u.String()
 }
 
 func ensureLogin(shared *sql.DB, cfg *pgx.ConnConfig) error {

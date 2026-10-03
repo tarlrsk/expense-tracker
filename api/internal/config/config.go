@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/mail"
 	"os"
 	"strconv"
 	"time"
@@ -20,6 +21,25 @@ const (
 	defaultLogLevel           = "info"
 	defaultDBStatementTimeout = 20 * time.Second
 	defaultDBMaxOpenConns     = 10
+	// The SMTP defaults fit Mailpit in docker-compose.yml (ADR-0026, ADR-0028).
+	defaultSMTPHost = "127.0.0.1"
+	defaultSMTPPort = 1025
+	defaultSMTPFrom = "Satang <noreply@localhost>"
+	defaultSMTPTLS  = SMTPTLSNone
+)
+
+// SMTPTLS is how the SMTP connection is encrypted (SMTP_TLS). There is no opportunistic mode: a
+// server that does not offer STARTTLS is refused under SMTPTLSStartTLS.
+type SMTPTLS string
+
+// The SMTP_TLS values.
+const (
+	// SMTPTLSNone: no encryption (local Mailpit). Not allowed together with credentials.
+	SMTPTLSNone SMTPTLS = "none"
+	// SMTPTLSStartTLS: plain connection upgraded with STARTTLS, which is mandatory.
+	SMTPTLSStartTLS SMTPTLS = "starttls"
+	// SMTPTLSImplicit: TLS from the first byte (usually port 465).
+	SMTPTLSImplicit SMTPTLS = "tls"
 )
 
 // Secret is a setting that must never be printed or logged: fmt and slog show it as
@@ -54,6 +74,22 @@ type Config struct {
 	DBStatementTimeout time.Duration
 	// DBMaxOpenConns is the size of the database connection pool (DB_MAX_OPEN_CONNS).
 	DBMaxOpenConns int
+	// SMTP is the outgoing mail server (ADR-0028).
+	SMTP SMTP
+}
+
+// SMTP holds the outgoing mail settings (ADR-0028). Defaults fit local Mailpit.
+type SMTP struct {
+	// Host and Port are the server (SMTP_HOST, SMTP_PORT).
+	Host string
+	Port int
+	// Username and Password are the login (SMTP_USERNAME, SMTP_PASSWORD); both or neither.
+	Username string
+	Password Secret
+	// From is the sender address (SMTP_FROM), for example "Satang <noreply@example.com>".
+	From string
+	// TLS is the encryption mode (SMTP_TLS).
+	TLS SMTPTLS
 }
 
 // Load reads the settings from the environment, applies defaults and validates them.
@@ -97,10 +133,48 @@ func Load() (Config, error) {
 	}
 	cfg.DBMaxOpenConns = maxConns
 
+	smtp, smtpErrs := loadSMTP()
+	cfg.SMTP = smtp
+	errs = append(errs, smtpErrs...)
+
 	if len(errs) > 0 {
 		return Config{}, fmt.Errorf("config: %w", errors.Join(errs...))
 	}
 	return cfg, nil
+}
+
+// loadSMTP reads the SMTP_* settings. SMTP_PASSWORD never goes into an error.
+func loadSMTP() (SMTP, []error) {
+	var errs []error
+	s := SMTP{
+		Host:     getenv("SMTP_HOST", defaultSMTPHost),
+		Username: os.Getenv("SMTP_USERNAME"),
+		Password: Secret(os.Getenv("SMTP_PASSWORD")),
+		From:     getenv("SMTP_FROM", defaultSMTPFrom),
+		TLS:      SMTPTLS(getenv("SMTP_TLS", string(defaultSMTPTLS))),
+	}
+	port, err := strconv.Atoi(getenv("SMTP_PORT", strconv.Itoa(defaultSMTPPort)))
+	if err != nil || port < 1 || port > 65535 {
+		errs = append(errs, fmt.Errorf("SMTP_PORT %q: must be a whole number from 1 to 65535", os.Getenv("SMTP_PORT")))
+	}
+	s.Port = port
+	if _, err := mail.ParseAddress(s.From); err != nil {
+		errs = append(errs, fmt.Errorf("SMTP_FROM %q: not an email address: %w", s.From, err))
+	}
+	switch s.TLS {
+	case SMTPTLSNone, SMTPTLSStartTLS, SMTPTLSImplicit:
+	default:
+		errs = append(errs, fmt.Errorf("SMTP_TLS %q: must be one of none, starttls, tls", s.TLS))
+	}
+	hasUser, hasPassword := s.Username != "", s.Password != ""
+	switch {
+	case hasUser != hasPassword:
+		errs = append(errs, errors.New("SMTP_USERNAME and SMTP_PASSWORD: set both or neither"))
+	case hasUser && s.TLS == SMTPTLSNone:
+		errs = append(errs, errors.New("SMTP_TLS is none but SMTP_USERNAME and SMTP_PASSWORD are set: "+
+			"a password must not go over a clear connection; use starttls or tls"))
+	}
+	return s, errs
 }
 
 func getenv(name, fallback string) string {

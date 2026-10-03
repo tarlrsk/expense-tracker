@@ -115,6 +115,8 @@ create table login_attempts (
 );
 create index login_attempts_email_idx on login_attempts (email, attempted_at);
 create index login_attempts_ip_idx on login_attempts (ip, attempted_at);
+-- Each failed login deletes the rows older than a day (ADR-0066).
+create index login_attempts_attempted_at_idx on login_attempts (attempted_at);
 
 alter table login_attempts enable row level security;
 create policy auth_all on login_attempts for all to app_auth using (true) with check (true);

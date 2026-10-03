@@ -12,8 +12,10 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/tarlrsk/expense-tracker/api/internal/config"
+	"github.com/tarlrsk/expense-tracker/api/internal/external/mail/send/sendtest"
 	"github.com/tarlrsk/expense-tracker/api/internal/handler/httpx"
 	"github.com/tarlrsk/expense-tracker/api/internal/registry"
+	"github.com/tarlrsk/expense-tracker/api/internal/tx/txtest"
 )
 
 func newTestEngine(t *testing.T) *gin.Engine {
@@ -21,8 +23,11 @@ func newTestEngine(t *testing.T) *gin.Engine {
 	deps := registry.Deps{
 		Config: config.Config{Addr: "127.0.0.1:0", RequestTimeout: 5 * time.Second, LogLevel: slog.LevelInfo},
 		Logger: slog.New(slog.DiscardHandler),
+		Clock:  time.Now,
+		Mailer: sendtest.New(),
 	}
-	engine, err := NewEngine(deps)
+	// No database: these tests never reach a handler that opens a transaction.
+	engine, err := NewEngine(deps, txtest.New())
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}

@@ -55,6 +55,13 @@ linters:
         - pattern: '^gorm\.Open$'
           pkg: '^gorm\.io/gorm$'
           msg: only internal/db opens the database (ADR-0032)
+        # Database errors leave an adaptor only through db.Err, which hides their text and keeps
+        # their kind (ADR-0067). Error is the field holding a result's error; Row, Rows and
+        # ScanRows hand out database/sql values whose errors would bypass db.Err; Statement embeds
+        # the *gorm.DB again (Statement.Error, Statement.DB.Error).
+        - pattern: '^gorm\.(DB|Statement)\.(Error|Row|Rows|ScanRows|Statement|AddError)$'
+          pkg: '^gorm\.io/gorm$'
+          msg: return database errors only through db.Err (ADR-0067)
   exclusions:
     rules:
       - path: internal/db/

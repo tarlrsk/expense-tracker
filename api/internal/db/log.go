@@ -11,7 +11,6 @@ import (
 	"net"
 	"regexp"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -137,17 +136,10 @@ func valueFree(err error) error {
 
 // pgError is a Postgres error by its SQLSTATE, constraint name and, for the classes in
 // messageClasses, its message.
-func pgError(pgErr *pgconn.PgError) error {
-	var b strings.Builder
-	b.WriteString("postgres error SQLSTATE ")
-	b.WriteString(pgErr.Code)
-	if pgErr.ConstraintName != "" {
-		b.WriteString(" constraint ")
-		b.WriteString(pgErr.ConstraintName)
-	}
+func pgError(pgErr *pgconn.PgError) *PgError {
+	e := &PgError{Code: pgErr.Code, Constraint: pgErr.ConstraintName}
 	if len(pgErr.Code) == 5 && slices.Contains(messageClasses, pgErr.Code[:2]) {
-		b.WriteString(": ")
-		b.WriteString(pgErr.Message)
+		e.Message = pgErr.Message
 	}
-	return errors.New(b.String())
+	return e
 }

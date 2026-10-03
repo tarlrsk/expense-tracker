@@ -50,7 +50,7 @@ func TestLogHasNoValues(t *testing.T) {
 	})
 	user := newUser(t, d)
 
-	const merchant, badID = "Secret Merchant 4711", "not-a-uuid-4711"
+	const merchant, badID = "Secret Merchant qxvz", "not-a-uuid-qxvz"
 	err := d.WithUserTx(t.Context(), user, func(ctx context.Context) error {
 		c, err := UserConn(ctx)
 		if err != nil {
@@ -75,7 +75,7 @@ func TestLogHasNoValues(t *testing.T) {
 			t.Errorf("log lacks %q:\n%s", want, log)
 		}
 	}
-	for _, secret := range []string{merchant, "4711", user.String()} {
+	for _, secret := range []string{merchant, "qxvz", user.String()} {
 		if strings.Contains(log, secret) {
 			t.Errorf("log contains the value %q:\n%s", secret, log)
 		}
