@@ -6,6 +6,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	// The API binary embeds the zone database (cmd/api); so does this test, so it passes on a
+	// machine without system zone files.
+	_ "time/tzdata"
 )
 
 const testURL = "postgres://app_login:pw-secret-123@db.example.com/app?sslmode=require" //nolint:gosec // fake credentials
@@ -14,6 +18,17 @@ const testURL = "postgres://app_login:pw-secret-123@db.example.com/app?sslmode=r
 var settings = []string{
 	"API_ADDR", "REQUEST_TIMEOUT", "LOG_LEVEL", "DATABASE_URL", "DB_STATEMENT_TIMEOUT", "DB_MAX_OPEN_CONNS",
 	"SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_TLS", "WEB_BASE_URL",
+	"APP_TIME_ZONE",
+}
+
+// mustZone loads an IANA time zone.
+func mustZone(t *testing.T, name string) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loc
 }
 
 const smtpPassword = "smtp-secret-456" //nolint:gosec // fake credentials
@@ -24,7 +39,7 @@ func TestLoad(t *testing.T) {
 		Addr: "127.0.0.1:8080", RequestTimeout: 50 * time.Second, LogLevel: slog.LevelInfo,
 		DatabaseURL: testURL, DBStatementTimeout: 20 * time.Second, DBMaxOpenConns: 10,
 		SMTP:       SMTP{Host: "127.0.0.1", Port: 1025, From: "Satang <noreply@localhost>", TLS: SMTPTLSNone},
-		WebBaseURL: "http://127.0.0.1:5173",
+		WebBaseURL: "http://127.0.0.1:5173", AppTimeZone: mustZone(t, "Asia/Bangkok"),
 	}
 	with := func(change func(*Config)) Config {
 		c := defaults
@@ -142,6 +157,16 @@ func TestLoad(t *testing.T) {
 			name: "web base url with credentials", env: env("WEB_BASE_URL", "https://user:pw-secret-123@satang.example"),
 			wantErr: "user name or password",
 		},
+		{
+			name: "app time zone", env: env("APP_TIME_ZONE", "Europe/Berlin"),
+			want: with(func(c *Config) { c.AppTimeZone = mustZone(t, "Europe/Berlin") }),
+		},
+		{name: "app time zone UTC", env: env("APP_TIME_ZONE", "UTC"), want: with(func(c *Config) { c.AppTimeZone = time.UTC })},
+		{name: "app time zone unknown", env: env("APP_TIME_ZONE", "Asia/Atlantis"), wantErr: "APP_TIME_ZONE"},
+		{name: "app time zone lower case", env: env("APP_TIME_ZONE", "asia/bangkok"), wantErr: "APP_TIME_ZONE"},
+		{name: "app time zone an offset", env: env("APP_TIME_ZONE", "+07:00"), wantErr: "APP_TIME_ZONE"},
+		{name: "app time zone a path", env: env("APP_TIME_ZONE", "../../etc/passwd"), wantErr: "APP_TIME_ZONE"},
+		{name: "app time zone of the machine", env: env("APP_TIME_ZONE", "Local"), wantErr: "APP_TIME_ZONE"},
 		{name: "pool size zero", env: env("DB_MAX_OPEN_CONNS", "0"), wantErr: "DB_MAX_OPEN_CONNS"},
 		{name: "pool size not a number", env: env("DB_MAX_OPEN_CONNS", "ten"), wantErr: "DB_MAX_OPEN_CONNS"},
 	}
@@ -166,6 +191,11 @@ func TestLoad(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Load() error = %v", err)
 			}
+			// A loaded zone is a new *time.Location each time: compare it by name.
+			if got.AppTimeZone == nil || got.AppTimeZone.String() != tt.want.AppTimeZone.String() {
+				t.Errorf("AppTimeZone = %v, want %v", got.AppTimeZone, tt.want.AppTimeZone)
+			}
+			got.AppTimeZone, tt.want.AppTimeZone = nil, nil
 			if got != tt.want {
 				t.Errorf("Load() = %+v, want %+v", got, tt.want)
 			}

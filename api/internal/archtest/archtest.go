@@ -24,7 +24,7 @@ var Modules = []string{"account", "categories", "transactions", "categorization"
 const HealthModule = "health"
 
 // NonModules are the known packages under internal/ that are not modules.
-var NonModules = []string{"app", "registry", "handler", "external", "tx", "db", "apperr", "middleware", "config", "archtest"}
+var NonModules = []string{"app", "registry", "handler", "external", "tx", "db", "apperr", "middleware", "config", "archtest", "authz"}
 
 // Violation is one broken rule.
 type Violation struct {
@@ -174,7 +174,7 @@ func checkImport(f file, target string) []Violation {
 	}
 
 	// Rule 6: business and base packages import no HTTP or wiring package.
-	if (isModule(srcTop) || slices.Contains([]string{"external", "tx", "apperr", "config"}, srcTop)) &&
+	if (isModule(srcTop) || slices.Contains([]string{"external", "tx", "apperr", "config", "authz"}, srcTop)) &&
 		slices.Contains([]string{"handler", "registry", "app", "middleware"}, dstTop) {
 		add(6, "imports internal/%s; %s must not depend on handler, registry, app or middleware", target, srcTop)
 	}

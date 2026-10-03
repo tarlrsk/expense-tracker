@@ -30,6 +30,8 @@ const (
 	defaultSMTPTLS  = SMTPTLSNone
 	// defaultWebBaseURL is the web dev server (ADR-0052).
 	defaultWebBaseURL = "http://127.0.0.1:5173"
+	// defaultAppTimeZone is the one app-wide time zone (ADR-0042).
+	defaultAppTimeZone = "Asia/Bangkok"
 )
 
 // SMTPTLS is how the SMTP connection is encrypted (SMTP_TLS). There is no opportunistic mode: a
@@ -84,6 +86,11 @@ type Config struct {
 	// ADR-0068): an absolute http or https URL without query or fragment, stored without a
 	// trailing slash.
 	WebBaseURL string
+	// AppTimeZone defines "today" for the app: the latest date a transaction may have, and later
+	// "yesterday" and the day boundary of the daily AI limits (APP_TIME_ZONE, ADR-0042). An IANA
+	// zone name; the API binary embeds the zone database (time/tzdata), so it loads without
+	// system zone files.
+	AppTimeZone *time.Location
 }
 
 // SMTP holds the outgoing mail settings (ADR-0028). Defaults fit local Mailpit.
@@ -151,6 +158,12 @@ func Load() (Config, error) {
 	}
 	cfg.WebBaseURL = webBaseURL
 
+	zone, err := parseTimeZone(getenv("APP_TIME_ZONE", defaultAppTimeZone))
+	if err != nil {
+		errs = append(errs, err)
+	}
+	cfg.AppTimeZone = zone
+
 	if len(errs) > 0 {
 		return Config{}, fmt.Errorf("config: %w", errors.Join(errs...))
 	}
@@ -214,6 +227,19 @@ func parseWebBaseURL(s string) (string, error) {
 		return "", fmt.Errorf("WEB_BASE_URL %q: must not have a query or a fragment", s)
 	}
 	return strings.TrimRight(s, "/"), nil
+}
+
+// parseTimeZone loads APP_TIME_ZONE, an IANA zone name such as Asia/Bangkok. "Local" is refused:
+// the app's day must not depend on the machine it runs on.
+func parseTimeZone(s string) (*time.Location, error) {
+	if s == "Local" {
+		return nil, fmt.Errorf("APP_TIME_ZONE %q: name a zone such as %s, not the machine's", s, defaultAppTimeZone)
+	}
+	loc, err := time.LoadLocation(s)
+	if err != nil {
+		return nil, fmt.Errorf("APP_TIME_ZONE %q: not a known time zone, such as %s", s, defaultAppTimeZone)
+	}
+	return loc, nil
 }
 
 func parseRequestTimeout(s string) (time.Duration, error) {

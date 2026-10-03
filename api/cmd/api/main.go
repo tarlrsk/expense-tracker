@@ -10,6 +10,10 @@ import (
 	"log/slog"
 	"os"
 
+	// The zone database is embedded, so APP_TIME_ZONE loads on a host without system zone files
+	// (ADR-0042, ADR-0071).
+	_ "time/tzdata"
+
 	"github.com/tarlrsk/expense-tracker/api/internal/app"
 )
 

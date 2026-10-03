@@ -68,7 +68,9 @@ func (s *syncBuffer) String() string {
 	return s.b.String()
 }
 
-func newAPIEnv(t *testing.T) *apiEnv {
+// newAPIEnv builds the env; opts change the dependencies before the engine is built (a fixed
+// clock, for example).
+func newAPIEnv(t *testing.T, opts ...func(*registry.Deps)) *apiEnv {
 	t.Helper()
 	logs := &syncBuffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -81,7 +83,11 @@ func newAPIEnv(t *testing.T) *apiEnv {
 	t.Cleanup(func() { _ = database.Close() })
 
 	mailer := sendtest.New()
-	deps := newDeps(config.Config{RequestTimeout: 20 * time.Second, WebBaseURL: testWebBaseURL}, logger, database, mailer)
+	deps := newDeps(config.Config{RequestTimeout: 20 * time.Second, WebBaseURL: testWebBaseURL, AppTimeZone: testZone(t)},
+		logger, database, mailer)
+	for _, opt := range opts {
+		opt(&deps)
+	}
 	engine, err := newEngine(deps, database, testRoutes)
 	if err != nil {
 		t.Fatalf("newEngine: %v", err)

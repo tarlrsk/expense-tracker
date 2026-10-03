@@ -12,6 +12,7 @@ import (
 	accountreg "github.com/tarlrsk/expense-tracker/api/internal/registry/account"
 	categoriesreg "github.com/tarlrsk/expense-tracker/api/internal/registry/categories"
 	healthreg "github.com/tarlrsk/expense-tracker/api/internal/registry/health"
+	transactionsreg "github.com/tarlrsk/expense-tracker/api/internal/registry/transactions"
 	"github.com/tarlrsk/expense-tracker/api/internal/tx"
 )
 
@@ -52,6 +53,7 @@ func newEngine(deps registry.Deps, auth tx.Auth, extra ...func(registry.Routes))
 	healthreg.Register(deps, routes)
 	accountreg.Register(deps, routes, auth)
 	categoriesreg.Register(deps, routes)
+	transactionsreg.Register(deps, routes)
 	for _, register := range extra {
 		register(routes)
 	}

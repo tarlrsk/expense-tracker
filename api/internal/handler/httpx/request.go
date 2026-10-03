@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
+	"slices"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -51,6 +53,29 @@ func bodyError(err error) error {
 		return apperr.New(apperr.InvalidInput, bodyTooLargeMessage)
 	}
 	return apperr.New(apperr.InvalidInput, malformedBodyMessage)
+}
+
+// queryMessage is the client message of Query. It never quotes the query: a value may be private
+// (a date range, for example).
+const queryMessage = "the query string has an unknown, repeated or malformed parameter"
+
+// Query returns the request's query parameters by name, each sent at most once. A name not in
+// allowed, a name sent twice or a malformed query string is an invalid_input error, like an
+// unknown field in a JSON body (DecodeJSON). A parameter sent without a value ("?month" or
+// "?month=") is present with the value "".
+func Query(c *gin.Context, allowed ...string) (map[string]string, error) {
+	values, err := url.ParseQuery(c.Request.URL.RawQuery)
+	if err != nil {
+		return nil, apperr.New(apperr.InvalidInput, queryMessage)
+	}
+	out := make(map[string]string, len(values))
+	for name, vs := range values {
+		if !slices.Contains(allowed, name) || len(vs) != 1 {
+			return nil, apperr.New(apperr.InvalidInput, queryMessage)
+		}
+		out[name] = vs[0]
+	}
+	return out, nil
 }
 
 // Caller is the logged-in caller, set by the session middleware on authed and operator routes.
