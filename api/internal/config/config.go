@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"net"
 	"net/mail"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -26,6 +28,8 @@ const (
 	defaultSMTPPort = 1025
 	defaultSMTPFrom = "Satang <noreply@localhost>"
 	defaultSMTPTLS  = SMTPTLSNone
+	// defaultWebBaseURL is the web dev server (ADR-0052).
+	defaultWebBaseURL = "http://127.0.0.1:5173"
 )
 
 // SMTPTLS is how the SMTP connection is encrypted (SMTP_TLS). There is no opportunistic mode: a
@@ -76,6 +80,10 @@ type Config struct {
 	DBMaxOpenConns int
 	// SMTP is the outgoing mail server (ADR-0028).
 	SMTP SMTP
+	// WebBaseURL is the web app's address, the start of every emailed link (WEB_BASE_URL,
+	// ADR-0068): an absolute http or https URL without query or fragment, stored without a
+	// trailing slash.
+	WebBaseURL string
 }
 
 // SMTP holds the outgoing mail settings (ADR-0028). Defaults fit local Mailpit.
@@ -137,6 +145,12 @@ func Load() (Config, error) {
 	cfg.SMTP = smtp
 	errs = append(errs, smtpErrs...)
 
+	webBaseURL, err := parseWebBaseURL(getenv("WEB_BASE_URL", defaultWebBaseURL))
+	if err != nil {
+		errs = append(errs, err)
+	}
+	cfg.WebBaseURL = webBaseURL
+
 	if len(errs) > 0 {
 		return Config{}, fmt.Errorf("config: %w", errors.Join(errs...))
 	}
@@ -182,6 +196,24 @@ func getenv(name, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// parseWebBaseURL checks WEB_BASE_URL: an absolute http or https URL with a host and without a
+// query or fragment (the link appends /set-password#token=...). A trailing slash is dropped. A
+// user name or password in it is refused without quoting the value: it would be mailed to every
+// invitee.
+func parseWebBaseURL(s string) (string, error) {
+	u, err := url.Parse(s)
+	if err == nil && u.User != nil {
+		return "", errors.New("WEB_BASE_URL: must not contain a user name or password")
+	}
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Opaque != "" {
+		return "", fmt.Errorf("WEB_BASE_URL %q: must be an absolute http or https URL, such as %s", s, defaultWebBaseURL)
+	}
+	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.ContainsAny(s, "?#") {
+		return "", fmt.Errorf("WEB_BASE_URL %q: must not have a query or a fragment", s)
+	}
+	return strings.TrimRight(s, "/"), nil
 }
 
 func parseRequestTimeout(s string) (time.Duration, error) {

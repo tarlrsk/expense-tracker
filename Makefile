@@ -9,7 +9,7 @@ TEST_DATABASE_URL ?= postgres://postgres:postgres@127.0.0.1:5433/expense_test?ss
 MIGRATIONS_DIR := ../db/migrations
 
 .DEFAULT_GOAL := help
-.PHONY: help tools test lint run migrate migrate-status migrate-down db-login-password web-install web-dev
+.PHONY: help tools test lint run operator migrate migrate-status migrate-down db-login-password web-install web-dev
 
 help: ## List the targets
 	@grep -E '^[a-z][a-z-]*:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
@@ -44,6 +44,17 @@ lint: ## Lint the API, then lint, format-check and type-check the web
 run: ## Run the API as app_login from DATABASE_URL (loads .env if it exists)
 	@set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \
 	cd api && $(GO) run ./cmd/api
+
+# Creates the account if needed, makes it an operator and, if it has no password yet, emails it a
+# set-password link (ADR-0035). Safe to run again; it never demotes anyone.
+operator: ## Create or promote an operator: make operator EMAIL=you@example.com (loads .env)
+	@if [ -z "$(EMAIL)" ]; then \
+		echo "operator needs the account's email address."; \
+		echo "Run: make operator EMAIL=you@example.com"; \
+		exit 1; \
+	fi; \
+	set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \
+	cd api && $(GO) run ./cmd/api operator -email '$(EMAIL)'
 
 migrate: ## Apply all pending migrations as the owner, MIGRATION_DATABASE_URL (loads .env)
 	@set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \

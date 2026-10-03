@@ -40,7 +40,15 @@ type apiEnv struct {
 	super  *sql.DB
 	ip     string
 	logs   *syncBuffer
+	// mail is the API's mailer; deps and db are its wiring, for tests that run a use case
+	// without HTTP (the operator command).
+	mail *sendtest.Fake
+	deps registry.Deps
+	db   *db.DB
 }
+
+// testWebBaseURL is WEB_BASE_URL in API tests: emailed links start with it.
+const testWebBaseURL = "http://web.test:5173"
 
 // syncBuffer is a bytes.Buffer safe for the concurrent requests of one test.
 type syncBuffer struct {
@@ -72,12 +80,13 @@ func newAPIEnv(t *testing.T) *apiEnv {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 
-	deps := newDeps(config.Config{RequestTimeout: 20 * time.Second}, logger, database, sendtest.New())
+	mailer := sendtest.New()
+	deps := newDeps(config.Config{RequestTimeout: 20 * time.Second, WebBaseURL: testWebBaseURL}, logger, database, mailer)
 	engine, err := newEngine(deps, database, testRoutes)
 	if err != nil {
 		t.Fatalf("newEngine: %v", err)
 	}
-	e := &apiEnv{t: t, engine: engine, super: dbtest.DB(t), ip: randomIP(t), logs: logs}
+	e := &apiEnv{t: t, engine: engine, super: dbtest.DB(t), ip: randomIP(t), logs: logs, mail: mailer, deps: deps, db: database}
 	t.Cleanup(func() { e.exec("delete from login_attempts where ip = $1::inet", e.ip) })
 	return e
 }
@@ -245,7 +254,8 @@ type accountOpts struct {
 	operator   bool
 }
 
-// newAccount inserts a user and profile as the superuser (T6 builds the invite). The account,
+// newAccount inserts a user and profile as the superuser (the users trigger seeds its default
+// categories), without going through the invite. The account,
 // its sessions and links, and its login attempts are removed when the test ends.
 func (e *apiEnv) newAccount(opts accountOpts) account {
 	e.t.Helper()

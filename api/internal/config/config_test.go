@@ -13,7 +13,7 @@ const testURL = "postgres://app_login:pw-secret-123@db.example.com/app?sslmode=r
 // settings are every variable Load reads.
 var settings = []string{
 	"API_ADDR", "REQUEST_TIMEOUT", "LOG_LEVEL", "DATABASE_URL", "DB_STATEMENT_TIMEOUT", "DB_MAX_OPEN_CONNS",
-	"SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_TLS",
+	"SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_TLS", "WEB_BASE_URL",
 }
 
 const smtpPassword = "smtp-secret-456" //nolint:gosec // fake credentials
@@ -23,7 +23,8 @@ func TestLoad(t *testing.T) {
 	defaults := Config{
 		Addr: "127.0.0.1:8080", RequestTimeout: 50 * time.Second, LogLevel: slog.LevelInfo,
 		DatabaseURL: testURL, DBStatementTimeout: 20 * time.Second, DBMaxOpenConns: 10,
-		SMTP: SMTP{Host: "127.0.0.1", Port: 1025, From: "Satang <noreply@localhost>", TLS: SMTPTLSNone},
+		SMTP:       SMTP{Host: "127.0.0.1", Port: 1025, From: "Satang <noreply@localhost>", TLS: SMTPTLSNone},
+		WebBaseURL: "http://127.0.0.1:5173",
 	}
 	with := func(change func(*Config)) Config {
 		c := defaults
@@ -119,6 +120,27 @@ func TestLoad(t *testing.T) {
 		{
 			name: "smtp password without username", env: env("SMTP_PASSWORD", smtpPassword, "SMTP_TLS", "tls"),
 			wantErr: "set both or neither",
+		},
+		{
+			name: "web base url https with a path and trailing slash", env: env("WEB_BASE_URL", "https://satang.example/app/"),
+			want: with(func(c *Config) { c.WebBaseURL = "https://satang.example/app" }),
+		},
+		{
+			name: "web base url http with port", env: env("WEB_BASE_URL", "http://192.168.1.20:5173"),
+			want: with(func(c *Config) { c.WebBaseURL = "http://192.168.1.20:5173" }),
+		},
+		{name: "web base url without scheme", env: env("WEB_BASE_URL", "satang.example"), wantErr: "WEB_BASE_URL"},
+		{name: "web base url host and port only", env: env("WEB_BASE_URL", "127.0.0.1:5173"), wantErr: "WEB_BASE_URL"},
+		{name: "web base url relative", env: env("WEB_BASE_URL", "/app"), wantErr: "WEB_BASE_URL"},
+		{name: "web base url other scheme", env: env("WEB_BASE_URL", "ftp://satang.example"), wantErr: "WEB_BASE_URL"},
+		{name: "web base url without host", env: env("WEB_BASE_URL", "https:///app"), wantErr: "WEB_BASE_URL"},
+		{name: "web base url with query", env: env("WEB_BASE_URL", "https://satang.example/?a=1"), wantErr: "query or a fragment"},
+		{name: "web base url with empty query", env: env("WEB_BASE_URL", "https://satang.example/?"), wantErr: "query or a fragment"},
+		{name: "web base url with fragment", env: env("WEB_BASE_URL", "https://satang.example/#x"), wantErr: "query or a fragment"},
+		{name: "web base url with empty fragment", env: env("WEB_BASE_URL", "https://satang.example/#"), wantErr: "query or a fragment"},
+		{
+			name: "web base url with credentials", env: env("WEB_BASE_URL", "https://user:pw-secret-123@satang.example"),
+			wantErr: "user name or password",
 		},
 		{name: "pool size zero", env: env("DB_MAX_OPEN_CONNS", "0"), wantErr: "DB_MAX_OPEN_CONNS"},
 		{name: "pool size not a number", env: env("DB_MAX_OPEN_CONNS", "ten"), wantErr: "DB_MAX_OPEN_CONNS"},

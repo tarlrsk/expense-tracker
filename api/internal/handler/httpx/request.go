@@ -87,3 +87,13 @@ func MustCaller(c *gin.Context) (Caller, bool) {
 	}
 	return caller, ok
 }
+
+// PathUUID returns the path parameter name as a UUID. A value that is not a UUID is a not_found
+// error with notFoundMessage, the same answer as an unknown id (ADR-0068).
+func PathUUID(c *gin.Context, name, notFoundMessage string) (uuid.UUID, error) {
+	id, err := uuid.Parse(c.Param(name))
+	if err != nil {
+		return uuid.Nil, apperr.New(apperr.NotFound, notFoundMessage)
+	}
+	return id, nil
+}
