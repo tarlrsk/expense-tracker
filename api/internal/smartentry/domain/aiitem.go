@@ -62,35 +62,42 @@ type Proposal struct {
 // it low, since the user must fill it in. Only a proposal with every field valid keeps the AI's
 // confidence; an unknown confidence is low.
 func CheckAIItem(item AIItem, today transactionsdomain.Date, categories map[int]uuid.UUID) Proposal {
-	p := Proposal{Text: strings.TrimSpace(item.Text), Confidence: item.Confidence}
-	if p.Confidence != ConfidenceHigh {
-		p.Confidence = ConfidenceLow
-	}
-	complete := true
-
+	p := Proposal{Text: strings.TrimSpace(item.Text)}
 	if a, err := transactionsdomain.ParseAmount(strings.TrimSpace(item.Amount)); err == nil {
 		p.Amount, p.HasAmount = a, true
-	} else {
-		complete = false
 	}
 	if d, err := transactionsdomain.ParseOccurredOn(strings.TrimSpace(item.OccurredOn), today); err == nil {
 		p.OccurredOn = d
-	} else {
-		complete = false
 	}
 	if m, err := transactionsdomain.NormalizeMerchant(item.Merchant); err == nil && m != "" {
 		p.Merchant = m
-	} else {
-		complete = false
 	}
 	if id, ok := categories[item.CategoryRef]; ok && item.CategoryRef != 0 && id != uuid.Nil {
 		p.CategoryID = id
-	} else {
-		complete = false
 	}
-
-	if !complete {
-		p.Confidence = ConfidenceLow
-	}
+	p.Confidence = confidence(item.Confidence, p)
 	return p
+}
+
+// ApplyRule gives a checked proposal the category of the user's merchant rule (docs/03-modules.md
+// §M5: the rule comes first) and works its confidence out again as CheckAIItem does, from item's
+// own confidence: a proposal that was low only for want of a category may now keep the AI's
+// confidence. A nil category changes nothing.
+func ApplyRule(item AIItem, p Proposal, category uuid.UUID) Proposal {
+	if category == uuid.Nil {
+		return p
+	}
+	p.CategoryID = category
+	p.Confidence = confidence(item.Confidence, p)
+	return p
+}
+
+// confidence is ai when every field of p is filled and ai is ConfidenceHigh, otherwise
+// ConfidenceLow.
+func confidence(ai Confidence, p Proposal) Confidence {
+	complete := p.HasAmount && !p.OccurredOn.IsZero() && p.Merchant != "" && p.CategoryID != uuid.Nil
+	if complete && ai == ConfidenceHigh {
+		return ConfidenceHigh
+	}
+	return ConfidenceLow
 }

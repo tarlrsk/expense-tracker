@@ -132,3 +132,45 @@ func TestCheckAIItemNilCategory(t *testing.T) {
 		t.Errorf("CheckAIItem = %+v, want no category and low", got)
 	}
 }
+
+// A rule's category replaces the AI's; the confidence is worked out again from the AI's own.
+func TestApplyRule(t *testing.T) {
+	today, _ := transactionsdomain.ParseDate("2026-10-04")
+	food, transport := uuid.New(), uuid.New()
+	categories := map[int]uuid.UUID{1: food}
+	full := AIItem{Text: "grab 145", Amount: "145", OccurredOn: "2026-10-04", Merchant: "grab", CategoryRef: 1, Confidence: ConfidenceHigh}
+	with := func(change func(*AIItem)) AIItem {
+		i := full
+		change(&i)
+		return i
+	}
+	tests := []struct {
+		name     string
+		item     AIItem
+		rule     uuid.UUID
+		wantCat  uuid.UUID
+		wantConf Confidence
+	}{
+		{"the rule replaces the AI's category, high stays high", full, transport, transport, ConfidenceHigh},
+		{"the AI's low stays low", with(func(i *AIItem) { i.Confidence = ConfidenceLow }), transport, transport, ConfidenceLow},
+		{"only the category was missing: high again", with(func(i *AIItem) { i.CategoryRef = 0 }), transport, transport, ConfidenceHigh},
+		{"a category the list did not have, now from the rule: high again", with(func(i *AIItem) { i.CategoryRef = 7 }), transport, transport, ConfidenceHigh},
+		{"another field is missing: low stays", with(func(i *AIItem) { i.CategoryRef, i.Amount = 0, "" }), transport, transport, ConfidenceLow},
+		{"a bad date: low stays", with(func(i *AIItem) { i.OccurredOn = "yesterday" }), transport, transport, ConfidenceLow},
+		{"an unknown confidence: low", with(func(i *AIItem) { i.CategoryRef, i.Confidence = 0, "sure" }), transport, transport, ConfidenceLow},
+		{"no rule category changes nothing", with(func(i *AIItem) { i.CategoryRef = 0 }), uuid.Nil, uuid.Nil, ConfidenceLow},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			checked := CheckAIItem(tt.item, today, categories)
+			got := ApplyRule(tt.item, checked, tt.rule)
+			if got.CategoryID != tt.wantCat || got.Confidence != tt.wantConf {
+				t.Errorf("ApplyRule = category %s %s, want %s %s", got.CategoryID, got.Confidence, tt.wantCat, tt.wantConf)
+			}
+			if got.Text != checked.Text || got.Amount != checked.Amount || got.HasAmount != checked.HasAmount ||
+				got.OccurredOn != checked.OccurredOn || got.Merchant != checked.Merchant {
+				t.Errorf("ApplyRule changed another field: %+v, from %+v", got, checked)
+			}
+		})
+	}
+}

@@ -160,8 +160,8 @@ func ParseCurrency(currency string) (string, error) {
 // Source says how a transaction was entered. It never changes after creation.
 type Source string
 
-// The sources (migration 0004). The API creates only manual ones for now; text, scan and csv
-// come with smart entry, scanning and import.
+// The sources (migration 0004). The API creates manual and text ones (smart entry); scan and csv
+// come with scanning and import.
 const (
 	SourceManual Source = "manual"
 	SourceText   Source = "text"
@@ -169,12 +169,15 @@ const (
 	SourceCSV    Source = "csv"
 )
 
-// ParseCreateSource returns the source a create may set: only manual for now (ADR-0071).
+// ParseCreateSource returns the source a create may set: manual or text (ADR-0071, PLAN-0003
+// T5).
 func ParseCreateSource(source string) (Source, error) {
-	if Source(source) != SourceManual {
+	switch s := Source(source); s {
+	case SourceManual, SourceText:
+		return s, nil
+	default:
 		return "", apperr.New(apperr.InvalidInput, SourceMessage)
 	}
-	return SourceManual, nil
 }
 
 // ParseSourceFilter returns source when it is one of the sources, for the list filter.
@@ -187,10 +190,11 @@ func ParseSourceFilter(source string) (Source, error) {
 	}
 }
 
-// Text limits (ADR-0071), in characters (runes).
+// Text limits (ADR-0071, PLAN-0003 T5), in characters (runes).
 const (
 	MaxMerchantLength = 100
 	MaxNoteLength     = 500
+	MaxRawInputLength = 1000
 )
 
 // NormalizeMerchant trims whitespace around merchant; the result has at most MaxMerchantLength
@@ -207,12 +211,29 @@ func NormalizeMerchant(merchant string) (string, error) {
 // and no control character other than a newline. Windows line endings (\r\n) become \n. It may be
 // empty.
 func NormalizeNote(note string) (string, error) {
-	note = strings.TrimSpace(strings.ReplaceAll(note, "\r\n", "\n"))
-	badControl := func(r rune) bool { return r != '\n' && unicode.IsControl(r) }
-	if utf8.RuneCountInString(note) > MaxNoteLength || strings.ContainsFunc(note, badControl) {
+	note, ok := normalizeLines(note, MaxNoteLength)
+	if !ok {
 		return "", apperr.New(apperr.InvalidInput, NoteRuleMessage)
 	}
 	return note, nil
+}
+
+// NormalizeRawInput applies the note's rules to raw_input, the typed item of a text transaction,
+// with a limit of MaxRawInputLength characters. It may be empty.
+func NormalizeRawInput(raw string) (string, error) {
+	raw, ok := normalizeLines(raw, MaxRawInputLength)
+	if !ok {
+		return "", apperr.New(apperr.InvalidInput, RawInputRuleMessage)
+	}
+	return raw, nil
+}
+
+// normalizeLines trims s after turning \r\n into \n; ok is false when the result has more than max
+// characters or a control character other than a newline.
+func normalizeLines(s string, maxLen int) (string, bool) {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n"))
+	badControl := func(r rune) bool { return r != '\n' && unicode.IsControl(r) }
+	return s, utf8.RuneCountInString(s) <= maxLen && !strings.ContainsFunc(s, badControl)
 }
 
 // canonicalUUIDLength is the length of the hyphenated form 01890a5d-ac96-774b-bcce-b302099a8057.

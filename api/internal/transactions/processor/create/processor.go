@@ -131,5 +131,13 @@ func (p *processor) check(req Request) (transactionsinsertport.NewTransaction, e
 			return nt, err
 		}
 	}
+	if req.RawInput != nil {
+		if nt.Source != domain.SourceText {
+			return nt, apperr.New(apperr.InvalidInput, domain.RawInputSourceMessage)
+		}
+		if nt.RawInput, err = domain.NormalizeRawInput(*req.RawInput); err != nil {
+			return nt, err
+		}
+	}
 	return nt, nil
 }

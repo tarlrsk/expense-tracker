@@ -27,11 +27,11 @@ const categoryKey = "transactions_category_fk"
 // transaction. A concurrent insert of the same id waits for the first to commit, then does the
 // same.
 const insertSQL = `
-insert into transactions (id, owner_id, amount, currency, occurred_on, merchant, category_id, note, source)
-values (?, ?, ?::numeric, ?, ?::date, ?, ?, ?, ?)
+insert into transactions (id, owner_id, amount, currency, occurred_on, merchant, category_id, note, source, raw_input)
+values (?, ?, ?::numeric, ?, ?::date, ?, ?, ?, ?, ?)
 on conflict (id) do nothing
 returning id, owner_id, amount::text as amount, currency, to_char(occurred_on, 'YYYY-MM-DD') as occurred_on,
-          merchant, category_id, note, source, created_at, updated_at`
+          merchant, category_id, note, source, raw_input, created_at, updated_at`
 
 type row struct {
 	ID         uuid.UUID `gorm:"column:id"`
@@ -43,6 +43,7 @@ type row struct {
 	CategoryID uuid.UUID `gorm:"column:category_id"`
 	Note       string    `gorm:"column:note"`
 	Source     string    `gorm:"column:source"`
+	RawInput   string    `gorm:"column:raw_input"`
 	CreatedAt  time.Time `gorm:"column:created_at"`
 	UpdatedAt  time.Time `gorm:"column:updated_at"`
 }
@@ -54,7 +55,7 @@ func (pg) Insert(ctx context.Context, nt NewTransaction) (domain.Transaction, bo
 	}
 	var r row
 	res := c.Raw(insertSQL, nt.ID, nt.OwnerID, nt.Amount.String(), nt.Currency, nt.OccurredOn.String(),
-		nt.Merchant, nt.CategoryID, nt.Note, string(nt.Source)).Scan(&r)
+		nt.Merchant, nt.CategoryID, nt.Note, string(nt.Source), nt.RawInput).Scan(&r)
 	if err := db.Err(res); err != nil {
 		if categoryRefused(err) {
 			return domain.Transaction{}, false, ErrCategory
@@ -96,7 +97,7 @@ func (r row) transaction() (domain.Transaction, error) {
 	}
 	return domain.Transaction{
 		ID: r.ID, OwnerID: r.OwnerID, Amount: amount, Currency: r.Currency, OccurredOn: date,
-		Merchant: r.Merchant, CategoryID: r.CategoryID, Note: r.Note, Source: domain.Source(r.Source),
+		Merchant: r.Merchant, CategoryID: r.CategoryID, Note: r.Note, Source: domain.Source(r.Source), RawInput: r.RawInput,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}, nil
 }

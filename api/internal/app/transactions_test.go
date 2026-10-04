@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -198,8 +199,8 @@ func TestCreateTransaction(t *testing.T) {
 		}
 	})
 
-	t.Run("source: only manual", func(t *testing.T) {
-		for _, src := range []string{"text", "scan", "csv", "", "Manual", "other"} {
+	t.Run("source: only manual or text", func(t *testing.T) {
+		for _, src := range []string{"scan", "csv", "", "Manual", "TEXT", "other"} {
 			rec := e.createTx(tok, txBody(t, food, map[string]any{"source": src}))
 			assertBadRequest(t, "source "+src, rec, domain.SourceMessage)
 		}
@@ -897,8 +898,8 @@ func TestRemoveUserRemovesTransactions(t *testing.T) {
 	}
 }
 
-// No amount, merchant, note or date reaches the log: not from a create, an update, a list query
-// or a failing request (ADR-0065, ADR-0067).
+// No amount, merchant, note, raw_input or date reaches the log: not from a create, an update, a
+// list query or a failing request (ADR-0065, ADR-0067).
 func TestTransactionLogsNoValues(t *testing.T) {
 	e := newAPIEnv(t)
 	a := e.newAccount(accountOpts{})
@@ -909,7 +910,10 @@ func TestTransactionLogsNoValues(t *testing.T) {
 		"amount": "98765.43", "occurred_on": "2003-03-14", "merchant": "Merchant qxvzm", "note": "Note qxvzn",
 	})
 	e.mustPatchTx(tok, it.ID, `{"amount":"87654.32","merchant":"Shop qxvzs","note":"Other qxvzo","occurred_on":"2004-04-15"}`)
+	e.mustCreateTx(tok, food, map[string]any{"source": "text", "raw_input": "Typed qxvzt 12"})
 	for _, body := range []string{
+		txBody(t, food, map[string]any{"source": "text", "raw_input": "Bad\tqxvzr"}),
+		txBody(t, food, map[string]any{"raw_input": "Manual qxvzu"}),
 		txBody(t, food, map[string]any{"amount": "76543.219", "merchant": "Bad qxvzb"}),
 		txBody(t, food, map[string]any{"amount": "65432.10", "occurred_on": "2005-02-30", "note": "Bad qxvzd"}),
 		txBody(t, food, map[string]any{"amount": "54321.00", "merchant": "Bad\tqxvzc"}),
@@ -940,4 +944,111 @@ func TestTransactionLogsNoValues(t *testing.T) {
 			t.Errorf("logs contain %q:\n%s", secret, logs)
 		}
 	}
+}
+
+// POST /api/transactions with source text and raw_input (PLAN-0003 T5): the typed item is kept,
+// shown in every response, never changed by PATCH; raw_input is refused with source manual.
+func TestCreateTextTransaction(t *testing.T) {
+	e := newAPIEnv(t)
+	a := e.newAccount(accountOpts{})
+	tok := e.freshSession(a.id)
+	food := e.categoryID(tok, "Food")
+
+	t.Run("201 with source text and raw_input, trimmed; the rule is learnt as for any create", func(t *testing.T) {
+		e := e.with(t)
+		rec := e.createTx(tok, txBody(t, food, map[string]any{
+			"merchant": "ข้าวมันไก่", "amount": "60", "source": "text", "raw_input": "  ข้าวมันไก่ 60\r\nเมื่อวาน ",
+		}))
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+		}
+		assertKeys(t, "transaction", decodeObject(t, rec), txItemKeys...)
+		var it txItem
+		decodeStrict(t, rec, &it)
+		if it.Source != "text" || it.RawInput != "ข้าวมันไก่ 60\nเมื่อวาน" || it.Merchant != "ข้าวมันไก่" {
+			t.Errorf("created %+v", it)
+		}
+		e.assertRule(a.id, "ข้าวมันไก่", "ข้าวมันไก่", food)
+
+		list := e.listTxs(tok, query("source", "text"))
+		if len(list.Transactions) != 1 || list.Transactions[0] != it {
+			t.Errorf("list source=text = %+v, want %+v", list.Transactions, it)
+		}
+
+		// PATCH changes neither source nor raw_input.
+		got := e.mustPatchTx(tok, it.ID, `{"amount":"65"}`)
+		if got.Source != "text" || got.RawInput != it.RawInput || got.Amount != "65.00" {
+			t.Errorf("after PATCH %+v", got)
+		}
+		for _, body := range []string{`{"raw_input":"x"}`, `{"source":"manual"}`} {
+			assertBadRequest(t, "PATCH "+body, e.patchTx(tok, it.ID.String(), body), "")
+		}
+
+		// The same id again: the stored transaction, whatever raw_input says now.
+		again := e.createTx(tok, jsonBody(t, map[string]any{
+			"id": it.ID.String(), "amount": "1", "occurred_on": "2026-01-15", "category_id": food.String(),
+			"source": "text", "raw_input": "something else",
+		}))
+		var retry txItem
+		decodeStrict(t, again, &retry)
+		if again.Code != http.StatusOK || retry.RawInput != it.RawInput || retry.Amount != "65.00" {
+			t.Errorf("retry: %d %+v", again.Code, retry)
+		}
+	})
+
+	t.Run("source text without raw_input, and manual: raw_input is \"\"", func(t *testing.T) {
+		for _, fields := range []map[string]any{
+			{"source": "text"}, {"source": "text", "raw_input": nil}, {"source": "text", "raw_input": "   "}, {"source": "manual"}, nil,
+		} {
+			rec := e.createTx(tok, txBody(t, food, fields))
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("create %v: %d %s", fields, rec.Code, rec.Body.String())
+			}
+			m := decodeObject(t, rec)
+			if m["raw_input"] != "" {
+				t.Errorf("create %v: raw_input = %#v, want \"\"", fields, m["raw_input"])
+			}
+		}
+	})
+
+	t.Run("a raw_input of 1,000 characters is kept", func(t *testing.T) {
+		raw := strings.Repeat("ก", 1000)
+		it := e.mustCreateTx(tok, food, map[string]any{"source": "text", "raw_input": raw})
+		if it.RawInput != raw {
+			t.Errorf("raw_input of %d characters", len([]rune(it.RawInput)))
+		}
+	})
+
+	t.Run("refused: raw_input with manual or no source, too long, with a control character, not text", func(t *testing.T) {
+		before := e.txRows(a.id)
+		rules := e.merchantRules(a.id)
+		for _, c := range []struct {
+			name   string
+			fields map[string]any
+			msg    string
+		}{
+			{"with manual", map[string]any{"source": "manual", "raw_input": "x 5"}, domain.RawInputSourceMessage},
+			{"without a source", map[string]any{"raw_input": "x 5"}, domain.RawInputSourceMessage},
+			{"empty, without a source", map[string]any{"raw_input": ""}, domain.RawInputSourceMessage},
+			{"too long", map[string]any{"source": "text", "raw_input": strings.Repeat("ก", 1001)}, domain.RawInputRuleMessage},
+			{"a tab", map[string]any{"source": "text", "raw_input": "a\tb"}, domain.RawInputRuleMessage},
+			{"a NUL", map[string]any{"source": "text", "raw_input": "a\x00b"}, domain.RawInputRuleMessage},
+			{"a number", map[string]any{"source": "text", "raw_input": 5}, ""},
+			{"source scan", map[string]any{"source": "scan", "raw_input": "x"}, domain.SourceMessage},
+		} {
+			rec := e.createTx(tok, txBody(t, food, mergeFields(c.fields, map[string]any{"merchant": "Refused Shop"})))
+			assertBadRequest(t, c.name, rec, c.msg)
+		}
+		if got := e.txRows(a.id); !slices.Equal(got, before) {
+			t.Error("a refused create wrote something")
+		}
+		e.assertRulesUnchanged(a.id, rules, "a refused create")
+	})
+}
+
+// mergeFields returns a copy of a with b's keys added.
+func mergeFields(a, b map[string]any) map[string]any {
+	out := maps.Clone(a)
+	maps.Copy(out, b)
+	return out
 }

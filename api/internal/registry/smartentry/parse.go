@@ -1,6 +1,5 @@
-// Package smartentry wires the smart entry module's use cases. Every use case runs as app_user
-// through deps.UserTx; the module never gets the auth transactor (ADR-0032, ADR-0034). It has no
-// routes yet: POST /api/entry/parse comes with PLAN-0003 T5.
+// Package smartentry wires the smart entry module's use cases and routes. Every use case runs as
+// app_user through deps.UserTx; the module never gets the auth transactor (ADR-0032, ADR-0034).
 package smartentry
 
 import (

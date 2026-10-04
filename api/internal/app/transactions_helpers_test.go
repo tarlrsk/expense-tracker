@@ -41,7 +41,8 @@ func withZone(loc *time.Location) func(*registry.Deps) {
 
 // txItemKeys are exactly the keys of a transaction in a response.
 var txItemKeys = []string{
-	"id", "owner_id", "amount", "currency", "occurred_on", "merchant", "category_id", "note", "source", "created_at", "updated_at",
+	"id", "owner_id", "amount", "currency", "occurred_on", "merchant", "category_id", "note", "source", "raw_input", "created_at",
+	"updated_at",
 }
 
 // txItem is one transaction of a response.
@@ -55,6 +56,7 @@ type txItem struct {
 	CategoryID uuid.UUID `json:"category_id"`
 	Note       string    `json:"note"`
 	Source     string    `json:"source"`
+	RawInput   string    `json:"raw_input"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }

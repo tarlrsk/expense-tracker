@@ -11,8 +11,8 @@ import (
 )
 
 // Tests of the local parser (PLAN-0003 T3) as wired by registry/smartentry, on the Docker test
-// database: the rule lookup runs as app_user under row-level security. There is no endpoint yet
-// (T5), so the use case is called directly.
+// database: the rule lookup runs as app_user under row-level security. The use case is called
+// directly; POST /api/entry/parse, which runs it first, is tested in entryparse_test.go.
 
 // addRule inserts a merchant rule for the user as the superuser.
 func (e *apiEnv) addRule(userID uuid.UUID, key, merchant string, category uuid.UUID) {

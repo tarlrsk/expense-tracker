@@ -27,6 +27,8 @@ type NewTransaction struct {
 	CategoryID uuid.UUID
 	Note       string
 	Source     domain.Source
+	// RawInput is the typed text of a text transaction; "" otherwise.
+	RawInput string
 }
 
 // Port creates transactions.

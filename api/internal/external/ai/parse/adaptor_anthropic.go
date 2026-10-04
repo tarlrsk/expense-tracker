@@ -62,7 +62,10 @@ func newAnthropic(cfg config.AI, opts ...option.RequestOption) (Port, error) {
 	return a, nil
 }
 
-// Parse implements Port. Errors never quote the key, the text, the categories or the answer.
+// Configured implements Port: a key is set.
+func (a *anthropicAdaptor) Configured() bool { return a.configured }
+
+// Parse implements Port. Errors never quote the key, the lines, the categories or the answer.
 func (a *anthropicAdaptor) Parse(ctx context.Context, req Request) (Response, error) {
 	if err := tx.MustBeOutside(ctx); err != nil {
 		return Response{}, fmt.Errorf("ai parse: %w", err)
@@ -114,7 +117,7 @@ func (a *anthropicAdaptor) Parse(ctx context.Context, req Request) (Response, er
 			text.WriteString(block.Text)
 		}
 	}
-	resp, err := decodeAnswer(text.String(), req.Categories)
+	resp, err := decodeAnswer(text.String(), req.Lines, req.Categories)
 	if err != nil {
 		return Response{}, fmt.Errorf("ai parse: %w", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +36,8 @@ func (f categoryFn) Find(ctx context.Context, o, id uuid.UUID) (categoriesdomain
 	return f(ctx, o, id)
 }
 
+func ptr(s string) *string { return &s }
+
 func TestExecute(t *testing.T) {
 	user, other := uuid.New(), uuid.New()
 	id := uuid.Must(uuid.NewV7())
@@ -58,6 +61,9 @@ func TestExecute(t *testing.T) {
 		wantCreated bool
 		wantCalls   []string
 		wantTx      []txtest.Outcome
+		// wantSource and wantRaw are the inserted source and raw_input; "" is manual and none.
+		wantSource domain.Source
+		wantRaw    string
 	}{
 		{
 			name: "created", req: valid, finds: finds{{}}, category: &categoriesdomain.Category{ID: cat}, inserted: true,
@@ -107,7 +113,39 @@ func TestExecute(t *testing.T) {
 		{name: "date too late: no transaction", req: with(valid, func(r *Request) { r.OccurredOn = "2027-10-04" }), wantKind: apperr.InvalidInput, wantMsg: domain.DateRuleMessage},
 		{name: "bad category id: no transaction", req: with(valid, func(r *Request) { r.CategoryID = "x" }), wantKind: apperr.InvalidInput, wantMsg: domain.CategoryMessage},
 		{name: "bad currency: no transaction", req: with(valid, func(r *Request) { s := "USD"; r.Currency = &s }), wantKind: apperr.InvalidInput, wantMsg: domain.CurrencyMessage},
-		{name: "bad source: no transaction", req: with(valid, func(r *Request) { s := "text"; r.Source = &s }), wantKind: apperr.InvalidInput, wantMsg: domain.SourceMessage},
+		{
+			name: "source text with raw_input, trimmed", req: with(valid, func(r *Request) { r.Source, r.RawInput = ptr("text"), ptr(" lunch M 145\r\n") }),
+			finds: finds{{}}, category: &categoriesdomain.Category{ID: cat}, inserted: true, wantCreated: true,
+			wantCalls: []string{"find", "category", "insert"}, wantTx: []txtest.Outcome{txtest.Committed},
+			wantSource: domain.SourceText, wantRaw: "lunch M 145",
+		},
+		{
+			name: "source text without raw_input", req: with(valid, func(r *Request) { r.Source = ptr("text") }),
+			finds: finds{{}}, category: &categoriesdomain.Category{ID: cat}, inserted: true, wantCreated: true,
+			wantCalls: []string{"find", "category", "insert"}, wantTx: []txtest.Outcome{txtest.Committed}, wantSource: domain.SourceText,
+		},
+		{
+			name: "source manual sent: as the default", req: with(valid, func(r *Request) { r.Source = ptr("manual") }),
+			finds: finds{{}}, category: &categoriesdomain.Category{ID: cat}, inserted: true, wantCreated: true,
+			wantCalls: []string{"find", "category", "insert"}, wantTx: []txtest.Outcome{txtest.Committed},
+		},
+		{name: "bad source: no transaction", req: with(valid, func(r *Request) { r.Source = ptr("scan") }), wantKind: apperr.InvalidInput, wantMsg: domain.SourceMessage},
+		{
+			name: "raw_input with source manual: no transaction", req: with(valid, func(r *Request) { r.Source, r.RawInput = ptr("manual"), ptr("x 5") }),
+			wantKind: apperr.InvalidInput, wantMsg: domain.RawInputSourceMessage,
+		},
+		{
+			name: "raw_input without a source: no transaction", req: with(valid, func(r *Request) { r.RawInput = ptr("") }),
+			wantKind: apperr.InvalidInput, wantMsg: domain.RawInputSourceMessage,
+		},
+		{
+			name: "raw_input too long: no transaction", req: with(valid, func(r *Request) { r.Source, r.RawInput = ptr("text"), ptr(strings.Repeat("x", 1001)) }),
+			wantKind: apperr.InvalidInput, wantMsg: domain.RawInputRuleMessage,
+		},
+		{
+			name: "raw_input with a tab: no transaction", req: with(valid, func(r *Request) { r.Source, r.RawInput = ptr("text"), ptr("a\tb") }),
+			wantKind: apperr.InvalidInput, wantMsg: domain.RawInputRuleMessage,
+		},
 	}
 	// 17:30 UTC on 2 October 2026 is 3 October in Bangkok: the latest date is 2027-10-03.
 	now := func() time.Time { return time.Date(2026, time.October, 2, 17, 30, 0, 0, time.UTC) }
@@ -147,7 +185,10 @@ func TestExecute(t *testing.T) {
 					call(ctx, "insert", nt.OwnerID)
 					want := transactionsinsertport.NewTransaction{
 						ID: id, OwnerID: user, Amount: 14500, Currency: "THB", OccurredOn: nt.OccurredOn, Merchant: "M",
-						CategoryID: cat, Source: domain.SourceManual,
+						CategoryID: cat, Source: domain.SourceManual, RawInput: tt.wantRaw,
+					}
+					if tt.wantSource != "" {
+						want.Source = tt.wantSource
 					}
 					if nt != want || nt.OccurredOn.String() != "2026-01-15" {
 						t.Errorf("inserted %+v, want %+v", nt, want)

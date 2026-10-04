@@ -9,10 +9,10 @@ import (
 	transactionscreateproc "github.com/tarlrsk/expense-tracker/api/internal/transactions/processor/create"
 )
 
-// createRequest is the body of POST /api/transactions. Any other field (owner_id, raw_input ...)
+// createRequest is the body of POST /api/transactions. Any other field (owner_id, created_at ...)
 // is refused by DecodeJSON, and so is an amount sent as a JSON number: it must be text
 // (ADR-0071). A missing merchant or note is empty; a missing (or null) currency is THB and a
-// missing source is manual.
+// missing source is manual. raw_input is accepted only with source text; missing or null is none.
 type createRequest struct {
 	ID         string  `json:"id"`
 	Amount     string  `json:"amount"`
@@ -22,6 +22,7 @@ type createRequest struct {
 	Note       string  `json:"note"`
 	Currency   *string `json:"currency"`
 	Source     *string `json:"source"`
+	RawInput   *string `json:"raw_input"`
 }
 
 // Create handles POST /api/transactions (authed): 201 with the new transaction, or 200 with the
@@ -40,6 +41,7 @@ func Create(p transactionscreateproc.Processor) gin.HandlerFunc {
 		resp, err := p.Execute(c.Request.Context(), transactionscreateproc.Request{
 			UserID: caller.UserID, ID: req.ID, Amount: req.Amount, OccurredOn: req.OccurredOn,
 			CategoryID: req.CategoryID, Merchant: req.Merchant, Note: req.Note, Currency: req.Currency, Source: req.Source,
+			RawInput: req.RawInput,
 		})
 		if err != nil {
 			httpx.WriteError(c, err)

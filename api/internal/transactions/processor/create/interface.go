@@ -20,7 +20,8 @@ type Processor interface {
 }
 
 // Request is the caller and the new transaction as sent; Execute applies the rules. A nil
-// Currency is THB and a nil Source is manual.
+// Currency is THB and a nil Source is manual. RawInput may be set only with Source text; nil is
+// none.
 type Request struct {
 	UserID     uuid.UUID
 	ID         string
@@ -31,6 +32,7 @@ type Request struct {
 	Note       string
 	Currency   *string
 	Source     *string
+	RawInput   *string
 }
 
 // Response is the transaction as stored, and whether this request created it.

@@ -13,7 +13,7 @@ import (
 )
 
 // Transaction is one of a user's transactions. OwnerID is kept and sent in every response (the
-// groups guardrail of docs/05-roadmap.md); raw_input is not part of it until smart entry.
+// groups guardrail of docs/05-roadmap.md).
 type Transaction struct {
 	ID         uuid.UUID
 	OwnerID    uuid.UUID
@@ -24,8 +24,11 @@ type Transaction struct {
 	CategoryID uuid.UUID
 	Note       string
 	Source     Source
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// RawInput is the typed item a text transaction was made from; "" for none. Like Source it
+	// never changes after creation.
+	RawInput  string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Client messages (ADR-0071).
@@ -44,8 +47,13 @@ const (
 	CategoryMessage = "choose one of your active categories (create or unarchive one if there is none)"
 	// CurrencyMessage: a currency other than THB (ADR-0041).
 	CurrencyMessage = "currency must be THB"
-	// SourceMessage: a source other than manual on create.
-	SourceMessage = "source must be manual"
+	// SourceMessage: a source other than manual or text on create.
+	SourceMessage = "source must be manual or text"
+	// RawInputRuleMessage: a raw_input that is too long or has a control character other than a
+	// newline.
+	RawInputRuleMessage = "raw_input must be at most 1,000 characters, without control characters other than line breaks"
+	// RawInputSourceMessage: a raw_input on a create whose source is not text.
+	RawInputSourceMessage = "raw_input is accepted only with source text"
 	// MerchantRuleMessage: a merchant that is too long or has a control character.
 	MerchantRuleMessage = "merchant must be at most 100 characters, without control characters"
 	// NoteRuleMessage: a note that is too long or has a control character other than a newline.

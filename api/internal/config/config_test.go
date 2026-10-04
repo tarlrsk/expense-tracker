@@ -19,6 +19,7 @@ var settings = []string{
 	"API_ADDR", "REQUEST_TIMEOUT", "LOG_LEVEL", "DATABASE_URL", "DB_STATEMENT_TIMEOUT", "DB_MAX_OPEN_CONNS",
 	"SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_TLS", "WEB_BASE_URL",
 	"APP_TIME_ZONE", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "AI_TIMEOUT",
+	"AI_DAILY_PARSE_LIMIT",
 }
 
 // mustZone loads an IANA time zone.
@@ -42,7 +43,7 @@ func TestLoad(t *testing.T) {
 		DatabaseURL: testURL, DBStatementTimeout: 20 * time.Second, DBMaxOpenConns: 10,
 		SMTP:       SMTP{Host: "127.0.0.1", Port: 1025, From: "Satang <noreply@localhost>", TLS: SMTPTLSNone},
 		WebBaseURL: "http://127.0.0.1:5173", AppTimeZone: mustZone(t, "Asia/Bangkok"),
-		AI: AI{Model: "claude-haiku-4-5", Timeout: 20 * time.Second},
+		AI: AI{Model: "claude-haiku-4-5", Timeout: 20 * time.Second, DailyParseLimit: 100},
 	}
 	with := func(change func(*Config)) Config {
 		c := defaults
@@ -175,7 +176,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "ai all set", env: env("ANTHROPIC_API_KEY", anthropicKey, "ANTHROPIC_MODEL", "claude-sonnet-5-5", "AI_TIMEOUT", "15s"),
 			want: with(func(c *Config) {
-				c.AI = AI{APIKey: anthropicKey, Model: "claude-sonnet-5-5", Timeout: 15 * time.Second}
+				c.AI = AI{APIKey: anthropicKey, Model: "claude-sonnet-5-5", Timeout: 15 * time.Second, DailyParseLimit: 100}
 			}),
 		},
 		{
@@ -196,6 +197,11 @@ func TestLoad(t *testing.T) {
 			name: "ai key does not leak into other errors", env: env("ANTHROPIC_API_KEY", anthropicKey, "AI_TIMEOUT", "0s"),
 			wantErr: "AI_TIMEOUT",
 		},
+		{name: "daily parse limit set", env: env("AI_DAILY_PARSE_LIMIT", "25"), want: with(func(c *Config) { c.AI.DailyParseLimit = 25 })},
+		{name: "daily parse limit zero", env: env("AI_DAILY_PARSE_LIMIT", "0"), want: with(func(c *Config) { c.AI.DailyParseLimit = 0 })},
+		{name: "daily parse limit negative", env: env("AI_DAILY_PARSE_LIMIT", "-1"), wantErr: "AI_DAILY_PARSE_LIMIT"},
+		{name: "daily parse limit not a number", env: env("AI_DAILY_PARSE_LIMIT", "lots"), wantErr: "AI_DAILY_PARSE_LIMIT"},
+		{name: "daily parse limit with a fraction", env: env("AI_DAILY_PARSE_LIMIT", "1.5"), wantErr: "AI_DAILY_PARSE_LIMIT"},
 		{name: "pool size zero", env: env("DB_MAX_OPEN_CONNS", "0"), wantErr: "DB_MAX_OPEN_CONNS"},
 		{name: "pool size not a number", env: env("DB_MAX_OPEN_CONNS", "ten"), wantErr: "DB_MAX_OPEN_CONNS"},
 	}

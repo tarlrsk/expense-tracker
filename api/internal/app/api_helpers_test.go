@@ -50,6 +50,9 @@ type apiEnv struct {
 	db   *db.DB
 }
 
+// testParseLimit is AI_DAILY_PARSE_LIMIT in API tests unless a test sets its own.
+const testParseLimit = 100
+
 // testWebBaseURL is WEB_BASE_URL in API tests: emailed links start with it.
 const testWebBaseURL = "http://web.test:5173"
 
@@ -86,8 +89,10 @@ func newAPIEnv(t *testing.T, opts ...func(*registry.Deps)) *apiEnv {
 	t.Cleanup(func() { _ = database.Close() })
 
 	mailer, aiParser := sendtest.New(), parsetest.New()
-	deps := newDeps(config.Config{RequestTimeout: 20 * time.Second, WebBaseURL: testWebBaseURL, AppTimeZone: testZone(t)},
-		logger, database, mailer, aiParser)
+	deps := newDeps(config.Config{
+		RequestTimeout: 20 * time.Second, WebBaseURL: testWebBaseURL, AppTimeZone: testZone(t),
+		AI: config.AI{DailyParseLimit: testParseLimit},
+	}, logger, database, mailer, aiParser)
 	for _, opt := range opts {
 		opt(&deps)
 	}

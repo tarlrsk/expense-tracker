@@ -36,6 +36,9 @@ const (
 	defaultAnthropicModel = "claude-haiku-4-5"
 	// defaultAITimeout bounds one AI call, the SDK's retries included (PLAN-0003 T4).
 	defaultAITimeout = 20 * time.Second
+	// defaultAIDailyParseLimit is how many quick-entry requests may call the AI per user and day
+	// (PLAN-0003 T5).
+	defaultAIDailyParseLimit = 100
 )
 
 // SMTPTLS is how the SMTP connection is encrypted (SMTP_TLS). There is no opportunistic mode: a
@@ -109,6 +112,9 @@ type AI struct {
 	// Timeout bounds one AI call, the SDK's retries included (AI_TIMEOUT): more than 0 and less
 	// than RequestTimeout. The call also stops at the request's own deadline.
 	Timeout time.Duration
+	// DailyParseLimit is how many quick-entry requests of one user may call the AI on one day in
+	// the app time zone (AI_DAILY_PARSE_LIMIT): 0 or more; 0 means the AI is never called.
+	DailyParseLimit int
 }
 
 // SMTP holds the outgoing mail settings (ADR-0028). Defaults fit local Mailpit.
@@ -190,6 +196,11 @@ func Load() (Config, error) {
 		errs = append(errs, err)
 	}
 	cfg.AI.Timeout = aiTimeout
+	parseLimit, err := parseNonNegativeInt("AI_DAILY_PARSE_LIMIT", getenv("AI_DAILY_PARSE_LIMIT", strconv.Itoa(defaultAIDailyParseLimit)))
+	if err != nil {
+		errs = append(errs, err)
+	}
+	cfg.AI.DailyParseLimit = parseLimit
 
 	if len(errs) > 0 {
 		return Config{}, fmt.Errorf("config: %w", errors.Join(errs...))
@@ -316,6 +327,14 @@ func parsePositiveInt(name, s string) (int, error) {
 	n, err := strconv.Atoi(s)
 	if err != nil || n < 1 {
 		return 0, fmt.Errorf("%s %q: must be a whole number of at least 1", name, s)
+	}
+	return n, nil
+}
+
+func parseNonNegativeInt(name, s string) (int, error) {
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("%s %q: must be a whole number of at least 0", name, s)
 	}
 	return n, nil
 }

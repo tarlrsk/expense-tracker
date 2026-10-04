@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -148,6 +149,24 @@ func TestText(t *testing.T) {
 			t.Errorf("NormalizeNote(%q) = %q, %v", c.in, got, err)
 		}
 	}
+	for _, c := range []struct {
+		in, want string
+		ok       bool
+	}{
+		{" grab 145 ", "grab 145", true}, {"", "", true}, {"coffee 60\ngrab 145", "coffee 60\ngrab 145", true},
+		{strings.Repeat("ก", 1000), strings.Repeat("ก", 1000), true}, {" " + strings.Repeat("ก", 1000) + "\n", strings.Repeat("ก", 1000), true},
+		{strings.Repeat("ก", 1001), "", false}, {"a\r\nb", "a\nb", true}, {"a\rb", "", false}, {"a\tb", "", false}, {"a\x00", "", false},
+		{"a\u0085b", "", false},
+	} {
+		got, err := NormalizeRawInput(c.in)
+		if c.ok != (err == nil) || got != c.want {
+			t.Errorf("NormalizeRawInput(%q) = %q, %v", c.in, got, err)
+		}
+		var ae *apperr.Error
+		if !c.ok && (!errors.As(err, &ae) || ae.Message != RawInputRuleMessage) {
+			t.Errorf("NormalizeRawInput(%q) error = %v, want the raw_input message", c.in, err)
+		}
+	}
 }
 
 func TestCurrencyAndSource(t *testing.T) {
@@ -162,7 +181,10 @@ func TestCurrencyAndSource(t *testing.T) {
 	if s, err := ParseCreateSource("manual"); err != nil || s != SourceManual {
 		t.Errorf("ParseCreateSource(manual) = %q, %v", s, err)
 	}
-	for _, s := range []string{"text", "scan", "csv", "", "Manual"} {
+	if s, err := ParseCreateSource("text"); err != nil || s != SourceText {
+		t.Errorf("ParseCreateSource(text) = %q, %v", s, err)
+	}
+	for _, s := range []string{"scan", "csv", "", "Manual", "Text", " text"} {
 		if _, err := ParseCreateSource(s); err == nil {
 			t.Errorf("ParseCreateSource(%q) accepted", s)
 		}

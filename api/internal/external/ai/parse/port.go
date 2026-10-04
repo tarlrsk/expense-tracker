@@ -47,12 +47,25 @@ type Category struct {
 	Kind Kind
 }
 
-// Request is one text to read.
-type Request struct {
-	// Text is what the user typed. It must not be empty.
+// Line is one numbered line of the text to read: a part of what the user typed that the caller
+// could not read on its own (PLAN-0003 T5). A line usually holds one item but may hold several.
+type Line struct {
+	// Number identifies the line; numbers are positive and distinct. Each answered item names the
+	// line it came from.
+	Number int
+	// Text is the line as typed. It must not be blank.
 	Text string
+	// DateIfNone is the day, written YYYY-MM-DD, of an item of this line that has no date of its
+	// own.
+	DateIfNone string
+}
+
+// Request is the lines to read.
+type Request struct {
+	// Lines are the lines to read, in the order typed; there is at least one.
+	Lines []Line
 	// Today is the current day in the app time zone, written YYYY-MM-DD (ADR-0042). Relative
-	// dates in the text are read from it.
+	// dates in the lines are read from it.
 	Today string
 	// Categories are the user's active categories; refs must be positive and distinct.
 	Categories []Category
@@ -71,7 +84,9 @@ const (
 
 // Item is one item as the AI read it, before any check.
 type Item struct {
-	// Text is the part of the user's text the item came from.
+	// Line is the Number of the line the item came from; always one that was sent.
+	Line int
+	// Text is the part of the line the item came from.
 	Text string
 	// Amount is the amount in baht as text, such as "145.50"; "" when the AI found none.
 	Amount string
@@ -86,7 +101,8 @@ type Item struct {
 	Confidence Confidence
 }
 
-// Response is the items in the order written; there is at least one.
+// Response is the items in the order written, line by line; there is at least one. A line may
+// have several items, or none.
 type Response struct {
 	Items []Item
 }
@@ -101,15 +117,18 @@ var (
 	// cancellation also matches the context's error.
 	ErrUnavailable = errors.New("the AI is unavailable")
 	// ErrUnusable: the AI answered, but the answer cannot be used as a whole: it refused, it was
-	// cut off, or its JSON does not decode or has no item.
+	// cut off, or its JSON does not decode, has no item or names a line that was not sent.
 	ErrUnusable = errors.New("the AI's answer is unusable")
 )
 
 // Port reads quick entry text with the AI.
 type Port interface {
-	// Parse reads req.Text into items. It refuses to run inside an open database transaction
+	// Configured reports whether the AI can be called at all (a key is set). It makes no call;
+	// when it is false, Parse returns ErrNotConfigured.
+	Configured() bool
+	// Parse reads req.Lines into items. It refuses to run inside an open database transaction
 	// (tx.ErrInside), and stops at AI_TIMEOUT or ctx's deadline, whichever comes first. An
-	// invalid request (empty text, bad today, unknown style, bad refs) is an error matching none
-	// of the sentinels, and no call is made.
+	// invalid request (no line, a blank line, bad line numbers or dates, bad today, unknown
+	// style, bad refs) is an error matching none of the sentinels, and no call is made.
 	Parse(ctx context.Context, req Request) (Response, error)
 }
