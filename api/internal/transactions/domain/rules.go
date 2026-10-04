@@ -73,7 +73,7 @@ func (a Amount) String() string {
 	return s + strconv.FormatInt(cents, 10)
 }
 
-// Date is a calendar day. Only ParseDate, DateOf and the period helpers make one; the zero
+// Date is a calendar day. Only ParseDate, DateOf, AddDays and the period helpers make one; the zero
 // Date is no day.
 type Date struct {
 	// t is midnight UTC of the day.
@@ -122,6 +122,15 @@ func (d Date) IsZero() bool { return d.t.IsZero() }
 
 // Compare returns -1, 0 or +1 as d is before, equal to or after o.
 func (d Date) Compare(o Date) int { return d.t.Compare(o.t) }
+
+// AddDays returns the day n days after d (before it when n is negative). The zero Date stays the
+// zero Date.
+func (d Date) AddDays(n int) Date {
+	if d.t.IsZero() {
+		return Date{}
+	}
+	return Date{t: d.t.AddDate(0, 0, n)}
+}
 
 // MaxDate is the latest occurred_on on day today: one year later (a 29 February gives 1 March).
 func MaxDate(today Date) Date { return Date{t: today.t.AddDate(1, 0, 0)} }

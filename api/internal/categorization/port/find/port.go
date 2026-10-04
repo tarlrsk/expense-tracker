@@ -2,7 +2,7 @@
 // proposing a category (ADR-0078). Row-level security hides other users' rules, so another
 // user's rule is simply not found.
 //
-// No use case calls it yet: the local parser (PLAN-0003 T3) and POST /api/entry/parse (T5) will.
+// The smart entry module's local parser (smartentry/processor/parse, PLAN-0003 T3) uses it.
 package find
 
 import (

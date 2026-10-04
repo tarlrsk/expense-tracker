@@ -18,7 +18,7 @@ import (
 )
 
 // Modules in dependency order: a module may import only modules before it.
-var Modules = []string{"account", "categories", "transactions", "categorization", "entry", "imports", "dashboard", "budgets"}
+var Modules = []string{"account", "categories", "transactions", "categorization", "smartentry", "imports", "dashboard", "budgets"}
 
 // HealthModule is outside the order: it imports no module and no module imports it.
 const HealthModule = "health"

@@ -81,6 +81,29 @@ func TestDates(t *testing.T) {
 	}
 }
 
+func TestAddDays(t *testing.T) {
+	for _, c := range []struct {
+		from string
+		n    int
+		want string
+	}{
+		{"2026-10-04", 0, "2026-10-04"}, {"2026-10-04", -1, "2026-10-03"}, {"2026-10-04", -2, "2026-10-02"},
+		{"2026-10-01", -1, "2026-09-30"}, {"2026-01-01", -1, "2025-12-31"}, {"2028-03-01", -1, "2028-02-29"},
+		{"2026-03-01", -1, "2026-02-28"}, {"2026-12-31", 1, "2027-01-01"},
+	} {
+		d, ok := ParseDate(c.from)
+		if !ok {
+			t.Fatalf("ParseDate(%q)", c.from)
+		}
+		if got := d.AddDays(c.n).String(); got != c.want {
+			t.Errorf("%s.AddDays(%d) = %s, want %s", c.from, c.n, got, c.want)
+		}
+	}
+	if got := (Date{}).AddDays(-1); !got.IsZero() {
+		t.Errorf("zero Date.AddDays(-1) = %s, want the zero Date", got)
+	}
+}
+
 func TestParseNewID(t *testing.T) {
 	v7 := uuid.Must(uuid.NewV7())
 	for _, c := range []struct {
