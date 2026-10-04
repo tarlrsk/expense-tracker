@@ -74,7 +74,8 @@ function headerId(id: string): string {
  * The confirm sheet of quick entry (ADR-0076): every proposal as a compact row that opens in
  * place into the manual form's fields. "Save all" sends one POST /api/transactions per item, in
  * the order typed; saved ones leave the sheet, a failed one stays with its error. `onClose`
- * gets how many were saved and how many are left once the sheet should close.
+ * gets how many were saved, how many are left and the typed text of those left, once the sheet
+ * should close.
  */
 export function ConfirmSheet({
   session,
@@ -83,7 +84,7 @@ export function ConfirmSheet({
 }: {
   session: EntrySession
   open: boolean
-  onClose: (result: { saved: number; left: number }) => void
+  onClose: (result: { saved: number; left: number; rest: string[] }) => void
 }) {
   const queryClient = useQueryClient()
   const categoriesResult = useQuery(categoriesQuery)
@@ -147,7 +148,7 @@ export function ConfirmSheet({
     if (save.isPending) {
       return
     }
-    onClose({ saved, left: proposals.length })
+    onClose({ saved, left: proposals.length, rest: proposals.map((p) => p.text) })
   }
 
   function change(id: string, patch: Partial<TransactionDraft>) {
@@ -171,7 +172,7 @@ export function ConfirmSheet({
     const index = proposals.findIndex((p) => p.id === id)
     const next = proposals.filter((p) => p.id !== id)
     if (next.length === 0) {
-      onClose({ saved, left: 0 })
+      onClose({ saved, left: 0, rest: [] })
       return
     }
     setProposals(next)
@@ -234,7 +235,7 @@ export function ConfirmSheet({
     // Remove is off while saving, so only saves have changed the list.
     const left = before - savedIds.size
     if (left === 0) {
-      onClose({ saved: total, left: 0 })
+      onClose({ saved: total, left: 0, rest: [] })
       return
     }
     const failed = new Map<string, RowState>()

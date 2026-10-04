@@ -119,11 +119,12 @@ export function QuickEntry({ onNotice }: { onNotice: (text: string | null) => vo
           key={session.key}
           session={session}
           open={sheetOpen}
-          onClose={({ saved, left }) => {
+          onClose={({ saved, left, rest }) => {
             setSheetOpen(false)
-            if (saved > 0 && left === 0) {
-              // Everything typed is handled: the box is ready for the next text.
-              setText('')
+            if (saved > 0) {
+              // Only what is still to save stays in the box, one entry a line, so reading it
+              // again cannot propose a saved entry twice (ADR-0083); empty when all is handled.
+              setText(rest.join('\n'))
             }
             onNotice(savedNotice(saved, left))
           }}

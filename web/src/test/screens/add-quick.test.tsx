@@ -452,7 +452,7 @@ describe('Add, Quick mode', () => {
     expect(posted()).toHaveLength(0)
   })
 
-  it('says how many were saved when closed after a partial save', async () => {
+  it('says how many were saved and keeps only the rest when closed after a partial save', async () => {
     parsed([coffee, gift], 'limit_reached')
     const { user, sheet } = await readText('coffee 60, gift 500')
 
@@ -466,6 +466,6 @@ describe('Add, Quick mode', () => {
     expect(
       await screen.findByText('Saved 1 transaction. The rest were not saved.'),
     ).toBeInTheDocument()
-    expect(screen.getByLabelText('Entries')).toHaveValue('coffee 60, gift 500')
+    expect(screen.getByLabelText('Entries')).toHaveValue('gift 500')
   })
 })
