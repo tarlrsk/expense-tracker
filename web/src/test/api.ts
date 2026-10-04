@@ -5,6 +5,8 @@ import { vi } from 'vitest'
 export interface RecordedCall {
   method: string
   path: string
+  /** The query string, e.g. `month=2026-10`. */
+  query: URLSearchParams
   headers: Headers
   body: unknown
 }
@@ -35,10 +37,17 @@ export function mockApi(initial: Record<string, Handler> = {}) {
   const calls: RecordedCall[] = []
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-    const path = new URL(url, 'http://localhost').pathname
+    const parsed = new URL(url, 'http://localhost')
+    const path = parsed.pathname
     const method = init.method ?? 'GET'
     const body: unknown = typeof init.body === 'string' ? JSON.parse(init.body) : undefined
-    const call = { method, path, headers: new Headers(init.headers), body }
+    const call = {
+      method,
+      path,
+      query: parsed.searchParams,
+      headers: new Headers(init.headers),
+      body,
+    }
     calls.push(call)
     const handler = handlers.get(`${method} ${path}`)
     if (!handler) {
@@ -79,3 +88,54 @@ export const profile = {
 export const operatorProfile = { ...profile, role: 'operator' }
 
 export const session = { token: 'tok-new', expires_at: '2026-11-02T03:00:00Z' }
+
+/** A category as the API sends it; `n` makes the id unique. */
+export function category(
+  n: number,
+  fields: Partial<{
+    name: string
+    icon: string
+    kind: 'expense' | 'income'
+    archived: boolean
+    sort_order: number
+  }> = {},
+) {
+  return {
+    id: `0190a1b2-0000-7000-8000-1000000000${String(n).padStart(2, '0')}`,
+    name: `Category ${String(n)}`,
+    icon: '📦',
+    kind: 'expense' as 'expense' | 'income',
+    archived: false,
+    sort_order: n,
+    created_at: '2026-10-01T03:00:00Z',
+    updated_at: '2026-10-01T03:00:00Z',
+    ...fields,
+  }
+}
+
+/** A transaction as the API sends it; `n` makes the id unique. */
+export function transaction(
+  n: number,
+  fields: Partial<{
+    amount: string
+    occurred_on: string
+    merchant: string
+    category_id: string
+    note: string
+  }> = {},
+) {
+  return {
+    id: `0190a1b2-0000-7000-8000-2000000000${String(n).padStart(2, '0')}`,
+    owner_id: profile.id,
+    amount: '100.00',
+    currency: 'THB',
+    occurred_on: '2026-10-03',
+    merchant: '',
+    category_id: category(1).id,
+    note: '',
+    source: 'manual',
+    created_at: '2026-10-03T03:00:00Z',
+    updated_at: '2026-10-03T03:00:00Z',
+    ...fields,
+  }
+}

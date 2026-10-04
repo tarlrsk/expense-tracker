@@ -85,3 +85,103 @@ export interface InviteResponse {
 export interface EmailSentResponse {
   email_sent: boolean
 }
+
+// Categories (api/internal/handler/categories; ADR-0039, ADR-0061, ADR-0069).
+
+export const categoryKinds = ['expense', 'income'] as const
+export type CategoryKind = (typeof categoryKinds)[number]
+
+/** One category; GET /api/categories lists archived ones too, in the user's order. */
+export interface Category {
+  id: string
+  name: string
+  /** An emoji, or empty when the category has none. */
+  icon: string
+  kind: CategoryKind
+  archived: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+/** Body of GET /api/categories and PUT /api/categories/order. */
+export interface ListCategoriesResponse {
+  categories: Category[]
+}
+
+/** Body of POST /api/categories: added at the end. */
+export interface CreateCategoryRequest {
+  /** 1 to 50 characters; the API trims it and collapses inner whitespace. */
+  name: string
+  kind: CategoryKind
+  /** At most 32 characters; trimmed by the API. */
+  icon?: string
+}
+
+/** Body of PATCH /api/categories/{id}: only the fields sent change; `kind` never does. */
+export interface UpdateCategoryRequest {
+  name?: string
+  icon?: string
+  archived?: boolean
+}
+
+/** Body of PUT /api/categories/order: every non-archived id exactly once. */
+export interface ReorderCategoriesRequest {
+  ids: string[]
+}
+
+// Transactions (api/internal/handler/transactions; ADR-0040, ADR-0071). Amounts are text such
+// as "145.00", never numbers; dates are YYYY-MM-DD.
+
+export const transactionSources = ['manual', 'text', 'scan', 'csv'] as const
+export type TransactionSource = (typeof transactionSources)[number]
+
+export interface Transaction {
+  id: string
+  owner_id: string
+  amount: string
+  currency: string
+  occurred_on: string
+  /** Empty when there is none. */
+  merchant: string
+  category_id: string
+  /** Empty when there is none. */
+  note: string
+  source: TransactionSource
+  created_at: string
+  updated_at: string
+}
+
+/** Body of GET /api/transactions: newest first; `next_cursor` is null on the last page. */
+export interface ListTransactionsResponse {
+  transactions: Transaction[]
+  next_cursor: string | null
+}
+
+/** The period of a list: a month (`YYYY-MM`), or a date range with both ends included. */
+export type TransactionPeriod = { month: string } | { from?: string; to?: string }
+
+export type ListTransactionsParams = TransactionPeriod & {
+  /** 1 to 200; the API's default is 50. */
+  limit?: number
+  cursor?: string
+}
+
+/** Body of POST /api/transactions; `id` is a UUID v7 made by the app (ADR-0040). */
+export interface CreateTransactionRequest {
+  id: string
+  amount: string
+  occurred_on: string
+  category_id: string
+  merchant?: string
+  note?: string
+}
+
+/** Body of PATCH /api/transactions/{id}: only the fields sent change. */
+export interface UpdateTransactionRequest {
+  amount?: string
+  occurred_on?: string
+  category_id?: string
+  merchant?: string
+  note?: string
+}

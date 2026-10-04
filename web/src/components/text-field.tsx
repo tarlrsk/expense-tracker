@@ -17,6 +17,8 @@ export interface TextFieldProps extends InputProps {
   error?: string | null
   /** For a password: adds a show / hide control. */
   revealable?: boolean
+  /** Classes for the input itself; `className` styles the whole field. */
+  inputClassName?: string
 }
 
 /**
@@ -29,6 +31,7 @@ export function TextField({
   error,
   revealable = false,
   className,
+  inputClassName,
   type,
   ...props
 }: TextFieldProps) {
@@ -52,7 +55,7 @@ export function TextField({
           type={revealable && revealed ? 'text' : type}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy || undefined}
-          className={revealable ? 'pr-12' : undefined}
+          className={cn(revealable && 'pr-12', inputClassName)}
           {...props}
         />
         {revealable && (
@@ -70,6 +73,46 @@ export function TextField({
           </button>
         )}
       </div>
+      <p id={errorId} aria-live="polite" className="text-sm text-destructive empty:hidden">
+        {error ?? ''}
+      </p>
+    </div>
+  )
+}
+
+type TextAreaProps = Omit<
+  React.ComponentProps<'textarea'>,
+  'id' | 'aria-invalid' | 'aria-describedby'
+>
+
+export interface TextAreaFieldProps extends TextAreaProps {
+  label: string
+  hint?: string
+  error?: string | null
+}
+
+/** A labelled multi-line field, with its hint and error tied to it like TextField. */
+export function TextAreaField({ label, hint, error, className, ...props }: TextAreaFieldProps) {
+  const id = useId()
+  const hintId = `${id}-hint`
+  const errorId = `${id}-error`
+  const describedBy = [hint ? hintId : null, error ? errorId : null].filter(Boolean).join(' ')
+
+  return (
+    <div className={cn('flex flex-col gap-2', className)}>
+      <Label htmlFor={id}>{label}</Label>
+      {hint && (
+        <p id={hintId} className="-mt-1 text-sm text-muted-foreground">
+          {hint}
+        </p>
+      )}
+      <textarea
+        id={id}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy || undefined}
+        className="min-h-24 w-full min-w-0 rounded-xl border border-input bg-card px-3 py-2 text-base text-foreground transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 disabled:pointer-events-none disabled:opacity-60 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20"
+        {...props}
+      />
       <p id={errorId} aria-live="polite" className="text-sm text-destructive empty:hidden">
         {error ?? ''}
       </p>

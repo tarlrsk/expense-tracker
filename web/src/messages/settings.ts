@@ -7,6 +7,8 @@ export const settings = {
   saveName: 'Save name',
   savingName: 'Saving…',
   nameSaved: 'Name saved.',
+  categories: 'Categories',
+  categoriesHint: 'Add, rename, archive and reorder',
   changePassword: 'Change password',
   admin: 'Admin',
   adminHint: 'Invite people and manage accounts',

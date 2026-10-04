@@ -17,6 +17,7 @@ import { Route as AppAddRouteImport } from './routes/_app/add'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
 import { Route as AppSettingsAdminRouteImport } from './routes/_app/settings/admin'
+import { Route as AppSettingsCategoriesRouteImport } from './routes/_app/settings/categories'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -57,6 +58,11 @@ const AppSettingsAdminRoute = AppSettingsAdminRouteImport.update({
   path: '/settings/admin',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSettingsCategoriesRoute = AppSettingsCategoriesRouteImport.update({
+  id: '/settings/categories',
+  path: '/settings/categories',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -65,6 +71,7 @@ export interface FileRoutesByFullPath {
   '/add': typeof AppAddRoute
   '/history': typeof AppHistoryRoute
   '/settings/admin': typeof AppSettingsAdminRoute
+  '/settings/categories': typeof AppSettingsCategoriesRoute
   '/settings/': typeof AppSettingsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -74,6 +81,7 @@ export interface FileRoutesByTo {
   '/history': typeof AppHistoryRoute
   '/': typeof AppIndexRoute
   '/settings/admin': typeof AppSettingsAdminRoute
+  '/settings/categories': typeof AppSettingsCategoriesRoute
   '/settings': typeof AppSettingsIndexRoute
 }
 export interface FileRoutesById {
@@ -85,6 +93,7 @@ export interface FileRoutesById {
   '/_app/history': typeof AppHistoryRoute
   '/_app/': typeof AppIndexRoute
   '/_app/settings/admin': typeof AppSettingsAdminRoute
+  '/_app/settings/categories': typeof AppSettingsCategoriesRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
 }
 export interface FileRouteTypes {
@@ -96,6 +105,7 @@ export interface FileRouteTypes {
     | '/add'
     | '/history'
     | '/settings/admin'
+    | '/settings/categories'
     | '/settings/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -105,6 +115,7 @@ export interface FileRouteTypes {
     | '/history'
     | '/'
     | '/settings/admin'
+    | '/settings/categories'
     | '/settings'
   id:
     | '__root__'
@@ -115,6 +126,7 @@ export interface FileRouteTypes {
     | '/_app/history'
     | '/_app/'
     | '/_app/settings/admin'
+    | '/_app/settings/categories'
     | '/_app/settings/'
   fileRoutesById: FileRoutesById
 }
@@ -182,6 +194,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsAdminRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/settings/categories': {
+      id: '/_app/settings/categories'
+      path: '/settings/categories'
+      fullPath: '/settings/categories'
+      preLoaderRoute: typeof AppSettingsCategoriesRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -190,6 +209,7 @@ interface AppRouteChildren {
   AppHistoryRoute: typeof AppHistoryRoute
   AppIndexRoute: typeof AppIndexRoute
   AppSettingsAdminRoute: typeof AppSettingsAdminRoute
+  AppSettingsCategoriesRoute: typeof AppSettingsCategoriesRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
 }
 
@@ -198,6 +218,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppHistoryRoute: AppHistoryRoute,
   AppIndexRoute: AppIndexRoute,
   AppSettingsAdminRoute: AppSettingsAdminRoute,
+  AppSettingsCategoriesRoute: AppSettingsCategoriesRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
 }
 

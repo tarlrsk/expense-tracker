@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
-import { ChevronRightIcon, KeyRoundIcon, UsersIcon } from 'lucide-react'
+import { ChevronRightIcon, KeyRoundIcon, TagsIcon, UsersIcon } from 'lucide-react'
 import { useState } from 'react'
 import type { SubmitEvent } from 'react'
 
@@ -107,6 +107,19 @@ function SettingsContent({
       <DisplayNameForm key={profile.id} profile={profile} onNotice={onNotice} />
 
       <ul className="flex flex-col divide-y divide-border border-y border-border">
+        <li>
+          <Link
+            to="/settings/categories"
+            className="flex min-h-14 w-full items-center gap-3 py-3 text-base select-none"
+          >
+            <TagsIcon aria-hidden="true" className="size-5 text-muted-foreground" />
+            <span className="flex flex-1 flex-col">
+              <span>{t.categories}</span>
+              <span className="text-sm text-muted-foreground">{t.categoriesHint}</span>
+            </span>
+            <ChevronRightIcon aria-hidden="true" className="size-5 text-muted-foreground" />
+          </Link>
+        </li>
         <li>
           <button
             type="button"

@@ -68,3 +68,34 @@ export function oneOf<const T extends string>(
   }
   return value as T
 }
+
+export function nullableString(obj: JsonObject, key: string): string | null {
+  return obj[key] === null ? null : string(obj, key)
+}
+
+/** A whole number. */
+export function integer(obj: JsonObject, key: string): number {
+  const value = obj[key]
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
+    throw new ResponseShapeError(`${key} is not a whole number`)
+  }
+  return value
+}
+
+/** Money as the API writes it, such as "145.00" (ADR-0071); kept as text. */
+export function amount(obj: JsonObject, key: string): string {
+  const value = string(obj, key)
+  if (!/^-?\d+\.\d{2}$/.test(value)) {
+    throw new ResponseShapeError(`${key} is not an amount`)
+  }
+  return value
+}
+
+/** A calendar day written YYYY-MM-DD. */
+export function date(obj: JsonObject, key: string): string {
+  const value = string(obj, key)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new ResponseShapeError(`${key} is not a date`)
+  }
+  return value
+}
