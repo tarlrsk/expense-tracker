@@ -115,6 +115,14 @@ func appRoles(roles testRoles) presence {
 // checked by checkNoLeftovers.
 func afterDown(roles testRoles) map[int64]struct{ gone, kept []presence } {
 	return map[int64]struct{ gone, kept []presence }{
+		6: {
+			gone: []presence{table("ai_usage")},
+			kept: []presence{table("merchant_rules"), table("transactions"), table("users")},
+		},
+		5: {
+			gone: []presence{table("merchant_rules")},
+			kept: []presence{table("transactions"), table("categories"), table("users"), updatedFunc},
+		},
 		4: {
 			gone: []presence{table("transactions")},
 			kept: []presence{table("categories"), table("users"), seedTrigger},

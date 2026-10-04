@@ -37,6 +37,14 @@ var grants = map[string]map[string][]string{
 	"transactions.category_id": {"app_user": {"UPDATE"}},
 	"transactions.note":        {"app_user": {"UPDATE"}},
 	"transactions.updated_at":  {"app_user": {"UPDATE"}},
+
+	"merchant_rules":             {"app_user": {"SELECT", "INSERT", "DELETE"}},
+	"merchant_rules.merchant":    {"app_user": {"UPDATE"}},
+	"merchant_rules.category_id": {"app_user": {"UPDATE"}},
+	"merchant_rules.updated_at":  {"app_user": {"UPDATE"}},
+
+	"ai_usage":             {"app_user": {"SELECT", "INSERT"}},
+	"ai_usage.parse_count": {"app_user": {"UPDATE"}},
 }
 
 func TestPrivilegeMatrix(t *testing.T) {

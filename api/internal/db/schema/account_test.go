@@ -98,6 +98,8 @@ func TestAppAuthDeniedFinancialTables(t *testing.T) {
 	a := s.newUser(t)
 	food := s.category(t, a, "Food")
 	tx := s.newTransaction(t, a, food)
+	rule := s.newRule(t, a, food, "grab")
+	s.newUsage(t, a, "2026-10-01")
 
 	s.asAuth(t)
 	s.run(t, []attempt{
@@ -116,5 +118,20 @@ func TestAppAuthDeniedFinancialTables(t *testing.T) {
 		},
 		{name: "update transactions", sql: "update transactions set note = 'x' where id = $1", args: []any{tx}, wantCode: insufficientPrivilege},
 		{name: "delete transactions", sql: "delete from transactions where id = $1", args: []any{tx}, wantCode: insufficientPrivilege},
+		{name: "select merchant_rules", sql: "select * from merchant_rules", wantCode: insufficientPrivilege},
+		{
+			name: "insert merchant_rules",
+			sql:  "insert into merchant_rules (owner_id, merchant_key, merchant, category_id) values ($1, 'x', 'x', $2)",
+			args: []any{a, food}, wantCode: insufficientPrivilege,
+		},
+		{name: "update merchant_rules", sql: "update merchant_rules set merchant = 'x' where id = $1", args: []any{rule}, wantCode: insufficientPrivilege},
+		{name: "delete merchant_rules", sql: "delete from merchant_rules where id = $1", args: []any{rule}, wantCode: insufficientPrivilege},
+		{name: "select ai_usage", sql: "select * from ai_usage", wantCode: insufficientPrivilege},
+		{
+			name: "insert ai_usage", sql: "insert into ai_usage (owner_id, day) values ($1, date '2026-10-02')",
+			args: []any{a}, wantCode: insufficientPrivilege,
+		},
+		{name: "update ai_usage", sql: "update ai_usage set parse_count = 0 where owner_id = $1", args: []any{a}, wantCode: insufficientPrivilege},
+		{name: "delete ai_usage", sql: "delete from ai_usage where owner_id = $1", args: []any{a}, wantCode: insufficientPrivilege},
 	})
 }

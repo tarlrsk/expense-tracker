@@ -88,7 +88,10 @@ func TestSchemaGuards(t *testing.T) {
 	s := begin(t)
 	tables := s.strings(t, `select relname from pg_class
 		where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') order by relname`)
-	for _, want := range []string{"users", "profiles", "sessions", "email_tokens", "login_attempts", "categories", "transactions"} {
+	for _, want := range []string{
+		"users", "profiles", "sessions", "email_tokens", "login_attempts", "categories", "transactions",
+		"merchant_rules", "ai_usage",
+	} {
 		if !slices.Contains(tables, want) {
 			t.Fatalf("table %s missing; tables: %v", want, tables)
 		}
@@ -121,6 +124,9 @@ func TestSchemaGuards(t *testing.T) {
 			{"categories", "id"}, {"categories", "owner_id"}, {"categories", "kind"}, {"categories", "created_at"},
 			{"transactions", "id"}, {"transactions", "owner_id"}, {"transactions", "source"},
 			{"transactions", "raw_input"}, {"transactions", "created_at"},
+			{"merchant_rules", "id"}, {"merchant_rules", "owner_id"}, {"merchant_rules", "merchant_key"},
+			{"merchant_rules", "created_at"},
+			{"ai_usage", "owner_id"}, {"ai_usage", "day"},
 		} {
 			var canUpdate bool
 			s.scan(t, "select has_column_privilege('app_user', ('public.' || quote_ident($1))::regclass, $2, 'UPDATE')",

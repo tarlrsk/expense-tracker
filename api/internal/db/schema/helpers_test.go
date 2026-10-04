@@ -155,6 +155,27 @@ func (s *session) newTransaction(t *testing.T, owner, categoryID string) string 
 	return id
 }
 
+// newRule inserts a merchant rule as app_user for owner, with merchant equal to key, and returns
+// its id. The role is the owner again afterwards.
+func (s *session) newRule(t *testing.T, owner, categoryID, key string) string {
+	t.Helper()
+	s.asUser(t, owner)
+	var id string
+	s.scan(t, `insert into merchant_rules (owner_id, merchant_key, merchant, category_id)
+		values ($1, $2, $2, $3) returning id`, []any{owner, key, categoryID}, &id)
+	s.asOwner(t)
+	return id
+}
+
+// newUsage inserts the owner's ai_usage row for day (YYYY-MM-DD) as app_user, with parse_count 1.
+// The role is the owner again afterwards.
+func (s *session) newUsage(t *testing.T, owner, day string) {
+	t.Helper()
+	s.asUser(t, owner)
+	s.exec(t, "insert into ai_usage (owner_id, day, parse_count) values ($1, $2, 1)", owner, day)
+	s.asOwner(t)
+}
+
 // attempt is one statement and its expected outcome: an SQLSTATE, or success with a row count.
 type attempt struct {
 	name     string

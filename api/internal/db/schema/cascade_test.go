@@ -3,7 +3,7 @@ package schema
 import "testing"
 
 // Removing a user as app_auth deletes all their data through `on delete cascade`, including
-// categories and transactions on which app_auth has no rights (ADR-0034; PLAN-0002 open question).
+// the financial tables, on which app_auth has no rights (ADR-0034; PLAN-0002 open question).
 // Another user's rows stay.
 func TestRemoveUserCascades(t *testing.T) {
 	s := begin(t)
@@ -14,7 +14,10 @@ func TestRemoveUserCascades(t *testing.T) {
 			values ($1, gen_random_uuid()::text::bytea, now() + interval '30 days')`, u)
 		s.exec(t, `insert into email_tokens (user_id, purpose, token_hash, expires_at)
 			values ($1, 'set_password', gen_random_uuid()::text::bytea, now() + interval '7 days')`, u)
-		s.newTransaction(t, u, s.category(t, u, "Food"))
+		food := s.category(t, u, "Food")
+		s.newTransaction(t, u, food)
+		s.newRule(t, u, food, "grab")
+		s.newUsage(t, u, "2026-10-01")
 	}
 
 	s.asAuth(t)
@@ -33,6 +36,8 @@ func TestRemoveUserCascades(t *testing.T) {
 		{"email_tokens", "select count(*) from email_tokens where user_id = $1", 1},
 		{"categories", "select count(*) from categories where owner_id = $1", 13},
 		{"transactions", "select count(*) from transactions where owner_id = $1", 1},
+		{"merchant_rules", "select count(*) from merchant_rules where owner_id = $1", 1},
+		{"ai_usage", "select count(*) from ai_usage where owner_id = $1", 1},
 	}
 	for _, c := range counts {
 		if n := s.count(t, c.query, a); n != 0 {

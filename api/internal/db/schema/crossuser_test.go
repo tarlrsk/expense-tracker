@@ -72,6 +72,73 @@ func TestTransactionsCrossUser(t *testing.T) {
 	}
 }
 
+// User B can neither see nor change user A's merchant rules.
+func TestMerchantRulesCrossUser(t *testing.T) {
+	s := begin(t)
+	a, b := s.newUser(t), s.newUser(t)
+	foodA, foodB := s.category(t, a, "Food"), s.category(t, b, "Food")
+	ruleA := s.newRule(t, a, foodA, "grab")
+	ruleB := s.newRule(t, b, foodB, "grab")
+
+	s.asUser(t, b)
+	s.run(t, []attempt{
+		{name: "select A's row", sql: "select * from merchant_rules where id = $1", args: []any{ruleA}, wantRows: 0},
+		{name: "select all sees only own", sql: "select * from merchant_rules", wantRows: 1},
+		{name: "update A's row", sql: "update merchant_rules set merchant = 'Hacked' where id = $1", args: []any{ruleA}, wantRows: 0},
+		{name: "update all touches only own", sql: "update merchant_rules set merchant = 'Grab'", wantRows: 1},
+		{name: "delete A's row", sql: "delete from merchant_rules where id = $1", args: []any{ruleA}, wantRows: 0},
+		{
+			name: "insert as A",
+			sql:  "insert into merchant_rules (owner_id, merchant_key, merchant, category_id) values ($1, 'kfc', 'KFC', $2)",
+			args: []any{a, foodA}, wantCode: insufficientPrivilege,
+		},
+		{name: "move own row to A", sql: "update merchant_rules set owner_id = $1 where id = $2", args: []any{a, ruleB}, wantCode: insufficientPrivilege},
+	})
+
+	s.asOwner(t)
+	var merchant string
+	s.scan(t, "select merchant from merchant_rules where id = $1", []any{ruleA}, &merchant)
+	if merchant != "grab" {
+		t.Errorf("A's rule changed: merchant %q", merchant)
+	}
+	if n := s.count(t, "select count(*) from merchant_rules where owner_id = $1", a); n != 1 {
+		t.Errorf("A has %d rules, want 1", n)
+	}
+}
+
+// User B can neither see nor change user A's AI usage rows; nobody can delete them.
+func TestAIUsageCrossUser(t *testing.T) {
+	s := begin(t)
+	a, b := s.newUser(t), s.newUser(t)
+	s.newUsage(t, a, "2026-10-01")
+	s.newUsage(t, b, "2026-10-01")
+
+	s.asUser(t, b)
+	s.run(t, []attempt{
+		{name: "select A's row", sql: "select * from ai_usage where owner_id = $1", args: []any{a}, wantRows: 0},
+		{name: "select all sees only own", sql: "select * from ai_usage", wantRows: 1},
+		{name: "update A's row", sql: "update ai_usage set parse_count = 0 where owner_id = $1", args: []any{a}, wantRows: 0},
+		{name: "update all touches only own", sql: "update ai_usage set parse_count = parse_count + 1", wantRows: 1},
+		{name: "delete A's row", sql: "delete from ai_usage where owner_id = $1", args: []any{a}, wantCode: insufficientPrivilege},
+		{
+			name: "insert as A", sql: "insert into ai_usage (owner_id, day) values ($1, date '2026-10-02')",
+			args: []any{a}, wantCode: insufficientPrivilege,
+		},
+		{
+			name: "move own row to A", sql: "update ai_usage set owner_id = $1 where owner_id = $2",
+			args: []any{a, b}, wantCode: insufficientPrivilege,
+		},
+	})
+
+	s.asOwner(t)
+	if n := s.count(t, "select parse_count from ai_usage where owner_id = $1 and day = date '2026-10-01'", a); n != 1 {
+		t.Errorf("A's parse_count = %d, want 1", n)
+	}
+	if n := s.count(t, "select count(*) from ai_usage where owner_id = $1", b); n != 1 {
+		t.Errorf("B has %d usage rows, want 1", n)
+	}
+}
+
 // Without app.user_id, app_user sees nothing and gets no error.
 func TestNoUserSeesNothing(t *testing.T) {
 	s := begin(t)
@@ -79,11 +146,16 @@ func TestNoUserSeesNothing(t *testing.T) {
 	// Inserted as the owner role, so this transaction never sets app.user_id before "never set".
 	s.exec(t, `insert into transactions (owner_id, amount, occurred_on, category_id)
 		values ($1, 1, current_date, $2)`, a, s.category(t, a, "Food"))
+	s.exec(t, `insert into merchant_rules (owner_id, merchant_key, merchant, category_id)
+		values ($1, 'grab', 'Grab', $2)`, a, s.category(t, a, "Food"))
+	s.exec(t, "insert into ai_usage (owner_id, day) values ($1, current_date)", a)
 
 	checks := []attempt{
 		{name: "select categories", sql: "select * from categories", wantRows: 0},
 		{name: "select transactions", sql: "select * from transactions", wantRows: 0},
 		{name: "select profiles", sql: "select * from profiles", wantRows: 0},
+		{name: "select merchant_rules", sql: "select * from merchant_rules", wantRows: 0},
+		{name: "select ai_usage", sql: "select * from ai_usage", wantRows: 0},
 		{name: "update categories", sql: "update categories set icon = 'x'", wantRows: 0},
 		{name: "delete transactions", sql: "delete from transactions", wantRows: 0},
 		{
@@ -115,7 +187,9 @@ func TestOwnerScopedForeignKey(t *testing.T) {
 	s := begin(t)
 	a, b := s.newUser(t), s.newUser(t)
 	foodA := s.category(t, a, "Food")
-	txB := s.newTransaction(t, b, s.category(t, b, "Food"))
+	foodB := s.category(t, b, "Food")
+	txB := s.newTransaction(t, b, foodB)
+	ruleB := s.newRule(t, b, foodB, "grab")
 
 	s.asUser(t, b)
 	s.run(t, []attempt{
@@ -127,6 +201,15 @@ func TestOwnerScopedForeignKey(t *testing.T) {
 		{
 			name: "update to A's category", sql: "update transactions set category_id = $1 where id = $2",
 			args: []any{foodA, txB}, wantCode: foreignKeyViolation,
+		},
+		{
+			name: "rule with A's category",
+			sql:  "insert into merchant_rules (owner_id, merchant_key, merchant, category_id) values ($1, 'kfc', 'KFC', $2)",
+			args: []any{b, foodA}, wantCode: foreignKeyViolation,
+		},
+		{
+			name: "rule moved to A's category", sql: "update merchant_rules set category_id = $1 where id = $2",
+			args: []any{foodA, ruleB}, wantCode: foreignKeyViolation,
 		},
 	})
 }
