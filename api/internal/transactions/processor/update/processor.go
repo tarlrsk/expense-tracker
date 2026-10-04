@@ -52,6 +52,7 @@ func (p *processor) Execute(ctx context.Context, req Request) (Response, error) 
 
 	var (
 		t          domain.Transaction
+		ch         transactionsupdateport.Changes
 		found      bool
 		noCategory bool
 	)
@@ -65,7 +66,8 @@ func (p *processor) Execute(ctx context.Context, req Request) (Response, error) 
 			found = false
 			return nil
 		}
-		ch, changed := changes(t, want)
+		var changed bool
+		ch, changed = changes(t, want)
 		if !changed {
 			return nil
 		}
@@ -92,7 +94,7 @@ func (p *processor) Execute(ctx context.Context, req Request) (Response, error) 
 	case noCategory:
 		return Response{}, apperr.New(apperr.InvalidInput, domain.CategoryMessage)
 	}
-	return Response{Transaction: t}, nil
+	return Response{Transaction: t, CategoryChanged: ch.CategoryID != nil, MerchantChanged: ch.Merchant != nil}, nil
 }
 
 // check applies the rules to every field that is set and returns them as values to compare and

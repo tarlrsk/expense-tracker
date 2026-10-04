@@ -48,6 +48,8 @@ func TestExecute(t *testing.T) {
 		wantKind   apperr.Kind
 		wantCalls  []string
 		wantChange string
+		// the change flags of the response
+		wantCategoryChanged, wantMerchantChanged bool
 	}{
 		{name: "no field", req: Request{}, wantKind: apperr.InvalidInput},
 		{name: "bad amount", req: Request{Amount: s("0")}, wantKind: apperr.InvalidInput},
@@ -61,7 +63,15 @@ func TestExecute(t *testing.T) {
 		},
 		{
 			name: "to an active category", req: Request{CategoryID: s(activeCat.String())},
-			locked: &cur, wantCalls: []string{"lock", "category", "update"}, wantChange: "category",
+			locked: &cur, wantCalls: []string{"lock", "category", "update"}, wantChange: "category", wantCategoryChanged: true,
+		},
+		{
+			name: "merchant only", req: Request{Merchant: s(" Other "), Amount: s("145")},
+			locked: &cur, wantCalls: []string{"lock", "update"}, wantChange: "merchant", wantMerchantChanged: true,
+		},
+		{
+			name: "merchant cleared", req: Request{Merchant: s("")},
+			locked: &cur, wantCalls: []string{"lock", "update"}, wantChange: "merchant", wantMerchantChanged: true,
 		},
 		{
 			name: "to another archived category", req: Request{CategoryID: s(uuid.NewString())},
@@ -102,6 +112,8 @@ func TestExecute(t *testing.T) {
 						got = "amount"
 					case ch.CategoryID != nil && ch.Amount == nil:
 						got = "category"
+					case ch.Merchant != nil && ch.Amount == nil && ch.CategoryID == nil:
+						got = "merchant"
 					}
 					if got != tt.wantChange {
 						t.Errorf("changes = %+v, want only %s", ch, tt.wantChange)
@@ -110,9 +122,13 @@ func TestExecute(t *testing.T) {
 				}),
 			})
 			tt.req.UserID, tt.req.ID = user, id
-			_, err := p.Execute(t.Context(), tt.req)
+			resp, err := p.Execute(t.Context(), tt.req)
 			if apperr.KindOf(err) != tt.wantKind {
 				t.Fatalf("error = %v, want kind %q", err, tt.wantKind)
+			}
+			if resp.CategoryChanged != tt.wantCategoryChanged || resp.MerchantChanged != tt.wantMerchantChanged {
+				t.Errorf("category changed %v, merchant changed %v; want %v, %v",
+					resp.CategoryChanged, resp.MerchantChanged, tt.wantCategoryChanged, tt.wantMerchantChanged)
 			}
 			if !slices.Equal(calls, tt.wantCalls) {
 				t.Errorf("calls = %v, want %v", calls, tt.wantCalls)

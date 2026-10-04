@@ -31,7 +31,11 @@ type Request struct {
 	Currency   *string
 }
 
-// Response is the transaction after the change.
+// Response is the transaction after the change, and whether this request changed its category
+// or its merchant (both false when nothing was written); merchant rules learn from those
+// changes (ADR-0078).
 type Response struct {
-	Transaction domain.Transaction
+	Transaction     domain.Transaction
+	CategoryChanged bool
+	MerchantChanged bool
 }
