@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { SubmitEvent } from 'react'
 
 import { deleteTransaction, updateTransaction } from '@/api/transactions'
@@ -50,9 +50,12 @@ export function TransactionSheet({
   onOpenChange: (open: boolean) => void
   onDone: (notice: string | null) => void
 }) {
+  // The sheet shows the transaction first; editing is a choice. Focus goes to the sheet itself,
+  // not to the Amount field, so opening it on a phone does not bring up the keyboard.
+  const popupRef = useRef<HTMLDivElement>(null)
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent>
+      <SheetContent ref={popupRef} initialFocus={popupRef}>
         {transaction && (
           <TransactionDetail transaction={transaction} categories={categories} onDone={onDone} />
         )}
