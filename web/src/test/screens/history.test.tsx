@@ -236,7 +236,7 @@ describe('Transaction detail', () => {
     expect(within(sheet).getByLabelText('Amount')).toHaveValue('145.00')
     expect(within(sheet).getByRole('radio', { name: 'Food' })).toBeChecked()
     expect(within(sheet).getByLabelText('Date')).toHaveValue('2026-10-04')
-    expect(within(sheet).getByLabelText('Merchant')).toHaveValue('Noodle shop')
+    expect(within(sheet).getByLabelText('Description')).toHaveValue('Noodle shop')
     expect(within(sheet).getByLabelText('Note')).toHaveValue('with Kan')
 
     const amount = within(sheet).getByLabelText('Amount')
@@ -266,7 +266,7 @@ describe('Transaction detail', () => {
     const sheet = await screen.findByRole('dialog', { name: 'Last payment' })
     expect(within(sheet).getByRole('radio', { name: 'Income' })).toBeChecked()
     expect(within(sheet).getByRole('radio', { name: 'Old job (Archived)' })).toBeChecked()
-    await user.clear(within(sheet).getByLabelText('Merchant'))
+    await user.clear(within(sheet).getByLabelText('Description'))
     await user.click(within(sheet).getByRole('button', { name: 'Save changes' }))
 
     await waitFor(() => {

@@ -90,13 +90,13 @@ describe('Add', () => {
     const { user } = openAdd()
 
     await user.type(await screen.findByLabelText('Amount'), '145')
-    await user.type(screen.getByLabelText('Merchant'), 'm'.repeat(101))
+    await user.type(screen.getByLabelText('Description'), 'm'.repeat(101))
     await user.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(screen.getByRole('group', { name: 'Category' })).toHaveAccessibleDescription(
       'Choose a category.',
     )
-    expect(screen.getByLabelText('Merchant')).toHaveAccessibleDescription(
+    expect(screen.getByLabelText('Description')).toHaveAccessibleDescription(
       expect.stringContaining('Use at most 100 characters.'),
     )
     expect(api.callsTo('POST /api/transactions')).toHaveLength(0)
@@ -107,7 +107,7 @@ describe('Add', () => {
 
     await user.type(await screen.findByLabelText('Amount'), '145')
     await user.click(await screen.findByRole('radio', { name: 'Food' }))
-    await user.type(screen.getByLabelText('Merchant'), '  Noodle shop ')
+    await user.type(screen.getByLabelText('Description'), '  Noodle shop ')
     await user.type(screen.getByLabelText('Note'), 'with Kan')
     await user.click(screen.getByRole('button', { name: 'Save' }))
 
@@ -122,7 +122,7 @@ describe('Add', () => {
       note: 'with Kan',
     })
     expect(screen.getByLabelText('Amount')).toHaveValue('')
-    expect(screen.getByLabelText('Merchant')).toHaveValue('')
+    expect(screen.getByLabelText('Description')).toHaveValue('')
     expect(screen.getByLabelText('Note')).toHaveValue('')
     expect(screen.getByRole('radio', { name: 'Food' })).not.toBeChecked()
     expect(screen.getByRole('radio', { name: 'Expense' })).toBeChecked()

@@ -9,7 +9,7 @@ export const transaction = {
   category: 'Category',
   archived: 'Archived',
   date: 'Date',
-  merchant: 'Merchant',
+  merchant: 'Description',
   merchantHint: 'Optional, up to 100 characters.',
   note: 'Note',
   noteHint: 'Optional, up to 500 characters.',
