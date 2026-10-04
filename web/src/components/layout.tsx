@@ -43,6 +43,22 @@ export function FormSheet({ className, ...props }: React.ComponentProps<'div'>) 
   )
 }
 
+/**
+ * The strip a screen's main button sits on: within thumb reach, just above the app bar on a
+ * phone, on a solid background so the form scrolls under it (ADR-0074).
+ */
+export function ActionBar({ className, ...props }: React.ComponentProps<'div'>) {
+  return (
+    <div
+      className={cn(
+        'sticky bottom-[calc(4rem+env(safe-area-inset-bottom))] mt-auto bg-background pt-3 pb-4 md:static md:py-0',
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
 export function PageTitle({ children }: { children: React.ReactNode }) {
   return <h1 className="text-display font-semibold">{children}</h1>
 }

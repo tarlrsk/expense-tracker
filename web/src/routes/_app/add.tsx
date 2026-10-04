@@ -5,8 +5,10 @@ import type { SubmitEvent } from 'react'
 
 import { createTransaction } from '@/api/transactions'
 import type { CreateTransactionRequest } from '@/api/types'
-import { FormSheet, PageTitle } from '@/components/layout'
+import { ChoiceGroup } from '@/components/choice-group'
+import { ActionBar, FormSheet, PageTitle } from '@/components/layout'
 import { FormAlert, Notice } from '@/components/messages'
+import { QuickEntry } from '@/components/quick-entry'
 import { TransactionFields } from '@/components/transaction-fields'
 import type { CategoriesState } from '@/components/transaction-fields'
 import { Button } from '@/components/ui/button'
@@ -21,19 +23,69 @@ import {
 import type { FieldErrors, TransactionDraft } from '@/lib/transaction-form'
 import { uuidv7 } from '@/lib/uuid'
 import { add as t } from '@/messages/add'
+import { entry } from '@/messages/entry'
 import { categoriesQuery, transactionsKey } from '@/queries/money'
 
-// Recording one expense or income (ADR-0074): amount first, then the kind and its categories.
-// After saving, the form starts again for the next one and stays on this screen.
+// Recording expenses and income. Two ways, one switch (ADR-0076): Quick, a typed text read by
+// POST /api/entry/parse and confirmed in a sheet; and Form, one transaction at a time
+// (ADR-0074), which starts again after each save and stays on this screen.
 export const Route = createFileRoute('/_app/add')({
   component: AddPage,
 })
+
+type AddMode = 'quick' | 'form'
+
+/** The localStorage key of the last mode used; device-only, not account data. */
+const addModeStorageKey = 'satang.add-mode'
+
+function readMode(): AddMode {
+  try {
+    return localStorage.getItem(addModeStorageKey) === 'form' ? 'form' : 'quick'
+  } catch {
+    return 'quick'
+  }
+}
+
+function rememberMode(mode: AddMode): void {
+  try {
+    localStorage.setItem(addModeStorageKey, mode)
+  } catch {
+    // Storage is unavailable: the mode is simply not remembered.
+  }
+}
+
+function AddPage() {
+  const [mode, setMode] = useState(readMode)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  return (
+    <>
+      <PageTitle>{t.title}</PageTitle>
+      <ChoiceGroup<AddMode>
+        legend={entry.mode}
+        choices={[
+          { value: 'quick', label: entry.quick },
+          { value: 'form', label: entry.form },
+        ]}
+        value={mode}
+        onChange={(next) => {
+          rememberMode(next)
+          setNotice(null)
+          setMode(next)
+        }}
+      />
+      <Notice>{notice}</Notice>
+      {mode === 'quick' ? <QuickEntry onNotice={setNotice} /> : <ManualForm onNotice={setNotice} />}
+    </>
+  )
+}
 
 function emptyDraft(today: string): TransactionDraft {
   return { amount: '', kind: 'expense', categoryId: null, date: today, merchant: '', note: '' }
 }
 
-function AddPage() {
+/** The manual form: one transaction; `onNotice` says "Saved." above the switch. */
+function ManualForm({ onNotice }: { onNotice: (text: string | null) => void }) {
   const queryClient = useQueryClient()
   const categories = useQuery(categoriesQuery)
   const today = todayIn()
@@ -42,7 +94,6 @@ function AddPage() {
   // after a failed send reuses it and the API saves once (ADR-0040).
   const [id, setId] = useState(() => uuidv7())
   const [errors, setErrors] = useState<FieldErrors>({})
-  const [notice, setNotice] = useState<string | null>(null)
 
   const save = useMutation({
     mutationFn: createTransaction,
@@ -51,7 +102,7 @@ function AddPage() {
       setDraft(emptyDraft(todayIn()))
       setId(uuidv7())
       setErrors({})
-      setNotice(t.saved)
+      onNotice(t.saved)
     },
     onError: (err) => {
       if (!isApiError(err, 'invalid_input')) {
@@ -85,7 +136,7 @@ function AddPage() {
     if (save.isPending) {
       return
     }
-    setNotice(null)
+    onNotice(null)
     const choices = categoryChoices(categories.data?.categories ?? [], draft.kind)
     const result = checkTransaction(draft, { today, categoryIds: choices.map((c) => c.id) })
     if (!result.ok) {
@@ -111,35 +162,30 @@ function AddPage() {
       : null
 
   return (
-    <>
-      <PageTitle>{t.title}</PageTitle>
-      <Notice>{notice}</Notice>
-      <form noValidate onSubmit={submit} className="flex flex-1 flex-col gap-6">
-        <FormSheet>
-          <TransactionFields
-            draft={draft}
-            onChange={(patch) => {
-              setDraft((d) => ({ ...d, ...patch }))
-            }}
-            errors={errors}
-            categories={categoriesState}
-            today={today}
-          />
-        </FormSheet>
-        {formError && <FormAlert>{formError}</FormAlert>}
-        {/* Within thumb reach: just above the app bar on a phone. */}
-        <div className="sticky bottom-[calc(4rem+env(safe-area-inset-bottom))] mt-auto bg-background pt-3 pb-4 md:static md:py-0">
-          <Button
-            type="submit"
-            size="lg"
-            className="w-full shadow-[0_4px_16px_rgb(31_122_84/0.3)] md:shadow-none"
-            disabled={save.isPending}
-            focusableWhenDisabled
-          >
-            {save.isPending ? t.saving : t.save}
-          </Button>
-        </div>
-      </form>
-    </>
+    <form noValidate onSubmit={submit} className="flex flex-1 flex-col gap-6">
+      <FormSheet>
+        <TransactionFields
+          draft={draft}
+          onChange={(patch) => {
+            setDraft((d) => ({ ...d, ...patch }))
+          }}
+          errors={errors}
+          categories={categoriesState}
+          today={today}
+        />
+      </FormSheet>
+      {formError && <FormAlert>{formError}</FormAlert>}
+      <ActionBar>
+        <Button
+          type="submit"
+          size="lg"
+          className="w-full shadow-[0_4px_16px_rgb(31_122_84/0.3)] md:shadow-none"
+          disabled={save.isPending}
+          focusableWhenDisabled
+        >
+          {save.isPending ? t.saving : t.save}
+        </Button>
+      </ActionBar>
+    </form>
   )
 }

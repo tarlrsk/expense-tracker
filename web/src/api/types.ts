@@ -148,6 +148,8 @@ export interface Transaction {
   /** Empty when there is none. */
   note: string
   source: TransactionSource
+  /** The typed item a quick-entry transaction came from; empty when there is none. */
+  raw_input: string
   created_at: string
   updated_at: string
 }
@@ -175,6 +177,10 @@ export interface CreateTransactionRequest {
   category_id: string
   merchant?: string
   note?: string
+  /** Where it came from; the API's default is `manual`. */
+  source?: TransactionSource
+  /** Only with `source: "text"`: the item as typed, at most 1,000 characters (ADR-0082). */
+  raw_input?: string
 }
 
 /** Body of PATCH /api/transactions/{id}: only the fields sent change. */
@@ -184,4 +190,47 @@ export interface UpdateTransactionRequest {
   category_id?: string
   merchant?: string
   note?: string
+}
+
+// Smart entry (api/internal/handler/smartentry; ADR-0080, ADR-0081, ADR-0082).
+
+export const entryConfidences = ['high', 'low'] as const
+export type EntryConfidence = (typeof entryConfidences)[number]
+
+export const entryResolvers = ['rule', 'ai', 'none'] as const
+export type EntryResolver = (typeof entryResolvers)[number]
+
+/** What the AI did for a parse: not needed, used, or why it was not. */
+export const entryAIStatuses = [
+  'not_needed',
+  'used',
+  'limit_reached',
+  'unavailable',
+  'not_configured',
+] as const
+export type EntryAIStatus = (typeof entryAIStatuses)[number]
+
+/** Body of POST /api/entry/parse: 1 to 1,000 characters, at most 20 items. */
+export interface ParseEntryRequest {
+  text: string
+}
+
+/** One proposal; nothing is saved. A field that could not be read is `""` (`category_id`: null). */
+export interface EntryItem {
+  /** The part of the typed text this item came from. */
+  text: string
+  /** Two decimals, such as "60.00", or `""`. */
+  amount: string
+  /** YYYY-MM-DD, or `""`. */
+  occurred_on: string
+  merchant: string
+  category_id: string | null
+  confidence: EntryConfidence
+  resolved_by: EntryResolver
+}
+
+/** Body of a 200 from POST /api/entry/parse: the proposals in the order typed. */
+export interface ParseEntryResponse {
+  items: EntryItem[]
+  ai: EntryAIStatus
 }

@@ -122,6 +122,8 @@ export function transaction(
     merchant: string
     category_id: string
     note: string
+    source: 'manual' | 'text' | 'scan' | 'csv'
+    raw_input: string
   }> = {},
 ) {
   return {
@@ -134,6 +136,7 @@ export function transaction(
     category_id: category(1).id,
     note: '',
     source: 'manual',
+    raw_input: '',
     created_at: '2026-10-03T03:00:00Z',
     updated_at: '2026-10-03T03:00:00Z',
     ...fields,

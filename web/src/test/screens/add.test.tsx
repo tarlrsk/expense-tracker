@@ -29,11 +29,13 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+// These are the manual form's tests: Add opens on Quick unless Form was used last.
 function openAdd() {
+  localStorage.setItem('satang.add-mode', 'form')
   return renderApp('/add', { token: 'tok' })
 }
 
-describe('Add', () => {
+describe('Add, Form mode', () => {
   it('asks for the amount first, with the number pad, and today as the date', async () => {
     openAdd()
 

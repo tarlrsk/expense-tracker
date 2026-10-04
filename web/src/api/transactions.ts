@@ -35,6 +35,7 @@ export function parseTransaction(value: unknown): Transaction {
     category_id: nonEmptyString(o, 'category_id'),
     note: string(o, 'note'),
     source: oneOf(o, 'source', transactionSources),
+    raw_input: string(o, 'raw_input'),
     created_at: timestamp(o, 'created_at'),
     updated_at: timestamp(o, 'updated_at'),
   }

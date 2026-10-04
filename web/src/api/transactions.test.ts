@@ -67,6 +67,10 @@ describe('listTransactions', () => {
       name: 'a null merchant',
       body: { transactions: [{ ...lunch, merchant: null }], next_cursor: null },
     },
+    {
+      name: 'no raw_input',
+      body: { transactions: [{ ...lunch, raw_input: undefined }], next_cursor: null },
+    },
   ])('refuses a list with $name', async ({ body }) => {
     api.on('GET /api/transactions', () => json(200, body))
 
@@ -152,6 +156,16 @@ describe('createTransaction', () => {
     )
 
     await expect(createTransaction(req)).rejects.toMatchObject({ code: 'invalid_input' })
+  })
+
+  it('sends a quick-entry transaction with its source and typed text', async () => {
+    const typed = { ...lunch, source: 'text', raw_input: 'noodles 145' }
+    api.on('POST /api/transactions', () => json(201, typed))
+    const textReq = { ...req, source: 'text' as const, raw_input: 'noodles 145' }
+
+    await expect(createTransaction(textReq)).resolves.toEqual(typed)
+
+    expect(api.onlyCall('POST /api/transactions').body).toEqual(textReq)
   })
 })
 
