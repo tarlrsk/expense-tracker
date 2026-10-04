@@ -9,7 +9,7 @@ TEST_DATABASE_URL ?= postgres://postgres:postgres@127.0.0.1:5433/expense_test?ss
 MIGRATIONS_DIR := ../db/migrations
 
 .DEFAULT_GOAL := help
-.PHONY: help tools test lint run operator migrate migrate-status migrate-down db-login-password web-install web-dev
+.PHONY: help tools test lint dev run operator migrate migrate-status migrate-down db-login-password web-install web-dev
 
 help: ## List the targets
 	@grep -E '^[a-z][a-z-]*:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
@@ -40,6 +40,17 @@ lint: ## Lint the API, then lint, format-check and type-check the web
 	cd web && $(NPM) run lint
 	cd web && $(NPM) run format:check
 	cd web && $(NPM) run typecheck
+
+# The one command for local use (ADR-0026): Mailpit in Docker, then the API and the web dev server
+# side by side in this terminal. Ctrl-C stops both; if one of them stops, the other is stopped
+# too, so a failed start is not hidden behind the other's log. Mailpit keeps running in Docker
+# (`docker compose down` stops it). The web server gets only API_ADDR, as in web-dev.
+dev: ## Start Mailpit, the API and the web app together (loads .env); Ctrl-C stops them
+	@$(DOCKER_COMPOSE) up -d --wait mailpit
+	@echo "Web app: http://127.0.0.1:5173   Mailpit: http://127.0.0.1:8025"
+	@($(MAKE) --no-print-directory run; kill 0) & \
+	($(MAKE) --no-print-directory web-dev; kill 0) & \
+	wait
 
 run: ## Run the API as app_login from DATABASE_URL (loads .env if it exists)
 	@set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \
