@@ -15,6 +15,7 @@ import (
 	"github.com/tarlrsk/expense-tracker/api/internal/config"
 	"github.com/tarlrsk/expense-tracker/api/internal/registry"
 	accountreg "github.com/tarlrsk/expense-tracker/api/internal/registry/account"
+	aireg "github.com/tarlrsk/expense-tracker/api/internal/registry/ai"
 	mailreg "github.com/tarlrsk/expense-tracker/api/internal/registry/mail"
 	"github.com/tarlrsk/expense-tracker/api/internal/tx"
 )
@@ -64,11 +65,16 @@ func RunOperator(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if err != nil {
 		return err
 	}
+	// The command makes no AI call; the parser is built so Deps is complete. It needs no network.
+	aiParser, err := aireg.NewParse(cfg)
+	if err != nil {
+		return err
+	}
 
 	// The command's work gets the same budget as a request (ADR-0043).
 	ctx, cancel := context.WithTimeout(ctx, cfg.RequestTimeout)
 	defer cancel()
-	return runOperator(ctx, newDeps(cfg, logger, database, mailer), database, *email, stdout)
+	return runOperator(ctx, newDeps(cfg, logger, database, mailer, aiParser), database, *email, stdout)
 }
 
 // runOperator is RunOperator's work with its dependencies passed in (the database as auth, the

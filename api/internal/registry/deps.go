@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/tarlrsk/expense-tracker/api/internal/config"
+	"github.com/tarlrsk/expense-tracker/api/internal/external/ai/parse"
 	"github.com/tarlrsk/expense-tracker/api/internal/external/mail/send"
 	"github.com/tarlrsk/expense-tracker/api/internal/tx"
 )
@@ -28,6 +29,8 @@ type Deps struct {
 	Clock func() time.Time
 	// Mailer sends email (ADR-0028); built by registry/mail.NewSend.
 	Mailer send.Port
+	// AIParse reads quick entry text with the AI (ADR-0009); built by registry/ai.NewParse.
+	AIParse parse.Port
 }
 
 // Routes are the route groups a module registers its endpoints on.

@@ -15,8 +15,10 @@ import (
 
 	"github.com/tarlrsk/expense-tracker/api/internal/config"
 	"github.com/tarlrsk/expense-tracker/api/internal/db"
+	"github.com/tarlrsk/expense-tracker/api/internal/external/ai/parse"
 	"github.com/tarlrsk/expense-tracker/api/internal/external/mail/send"
 	"github.com/tarlrsk/expense-tracker/api/internal/registry"
+	aireg "github.com/tarlrsk/expense-tracker/api/internal/registry/ai"
 	mailreg "github.com/tarlrsk/expense-tracker/api/internal/registry/mail"
 )
 
@@ -59,11 +61,15 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	aiParser, err := aireg.NewParse(cfg)
+	if err != nil {
+		return err
+	}
 
 	// database is also the auth transactor (tx.Auth). It is not in Deps (newDeps puts only its
 	// user-only view there): it goes only to the session check and the account module's
 	// Register (ADR-0032, ADR-0034).
-	engine, err := NewEngine(newDeps(cfg, logger, database, mailer), database)
+	engine, err := NewEngine(newDeps(cfg, logger, database, mailer, aiParser), database)
 	if err != nil {
 		return fmt.Errorf("build engine: %w", err)
 	}
@@ -107,8 +113,10 @@ func Run(ctx context.Context) error {
 
 // newDeps builds the shared dependencies. UserTx is database.UserOnly(), so no module can turn
 // it into a tx.Auth with a type assertion.
-func newDeps(cfg config.Config, logger *slog.Logger, database *db.DB, mailer send.Port) registry.Deps {
-	return registry.Deps{Config: cfg, Logger: logger, UserTx: database.UserOnly(), Clock: time.Now, Mailer: mailer}
+func newDeps(cfg config.Config, logger *slog.Logger, database *db.DB, mailer send.Port, aiParser parse.Port) registry.Deps {
+	return registry.Deps{
+		Config: cfg, Logger: logger, UserTx: database.UserOnly(), Clock: time.Now, Mailer: mailer, AIParse: aiParser,
+	}
 }
 
 // openDB connects to DATABASE_URL and runs the startup check. /api/healthz never uses it

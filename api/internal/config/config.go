@@ -32,6 +32,10 @@ const (
 	defaultWebBaseURL = "http://127.0.0.1:5173"
 	// defaultAppTimeZone is the one app-wide time zone (ADR-0042).
 	defaultAppTimeZone = "Asia/Bangkok"
+	// defaultAnthropicModel is Claude Haiku 4.5 (ADR-0009).
+	defaultAnthropicModel = "claude-haiku-4-5"
+	// defaultAITimeout bounds one AI call, the SDK's retries included (PLAN-0003 T4).
+	defaultAITimeout = 20 * time.Second
 )
 
 // SMTPTLS is how the SMTP connection is encrypted (SMTP_TLS). There is no opportunistic mode: a
@@ -91,6 +95,20 @@ type Config struct {
 	// zone name; the API binary embeds the zone database (time/tzdata), so it loads without
 	// system zone files.
 	AppTimeZone *time.Location
+	// AI is the Anthropic API used by smart entry (ADR-0009).
+	AI AI
+}
+
+// AI holds the Anthropic settings (ADR-0009). Without a key the API still starts; the AI port
+// then answers "not configured" without any network call.
+type AI struct {
+	// APIKey is the Anthropic API key (ANTHROPIC_API_KEY). Optional.
+	APIKey Secret
+	// Model is the model id sent with every call (ANTHROPIC_MODEL).
+	Model string
+	// Timeout bounds one AI call, the SDK's retries included (AI_TIMEOUT): more than 0 and less
+	// than RequestTimeout. The call also stops at the request's own deadline.
+	Timeout time.Duration
 }
 
 // SMTP holds the outgoing mail settings (ADR-0028). Defaults fit local Mailpit.
@@ -163,6 +181,15 @@ func Load() (Config, error) {
 		errs = append(errs, err)
 	}
 	cfg.AppTimeZone = zone
+
+	// The value of ANTHROPIC_API_KEY never goes into an error.
+	cfg.AI.APIKey = Secret(os.Getenv("ANTHROPIC_API_KEY"))
+	cfg.AI.Model = getenv("ANTHROPIC_MODEL", defaultAnthropicModel)
+	aiTimeout, err := parseAITimeout(getenv("AI_TIMEOUT", defaultAITimeout.String()), timeout)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	cfg.AI.Timeout = aiTimeout
 
 	if len(errs) > 0 {
 		return Config{}, fmt.Errorf("config: %w", errors.Join(errs...))
@@ -265,6 +292,22 @@ func parseStatementTimeout(s string, requestTimeout time.Duration) (time.Duratio
 	}
 	if requestTimeout > 0 && d >= requestTimeout {
 		return 0, fmt.Errorf("DB_STATEMENT_TIMEOUT %q: must be less than REQUEST_TIMEOUT (%s)", s, requestTimeout)
+	}
+	return d, nil
+}
+
+// parseAITimeout checks AI_TIMEOUT. When REQUEST_TIMEOUT is invalid (requestTimeout is 0) only
+// the lower bound is checked; that error is reported on its own.
+func parseAITimeout(s string, requestTimeout time.Duration) (time.Duration, error) {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("AI_TIMEOUT %q: %w", s, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("AI_TIMEOUT %q: must be greater than 0", s)
+	}
+	if requestTimeout > 0 && d >= requestTimeout {
+		return 0, fmt.Errorf("AI_TIMEOUT %q: must be less than REQUEST_TIMEOUT (%s)", s, requestTimeout)
 	}
 	return d, nil
 }

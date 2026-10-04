@@ -22,6 +22,7 @@ import (
 	"github.com/tarlrsk/expense-tracker/api/internal/config"
 	"github.com/tarlrsk/expense-tracker/api/internal/db"
 	"github.com/tarlrsk/expense-tracker/api/internal/db/dbtest"
+	"github.com/tarlrsk/expense-tracker/api/internal/external/ai/parse/parsetest"
 	"github.com/tarlrsk/expense-tracker/api/internal/external/mail/send/sendtest"
 	"github.com/tarlrsk/expense-tracker/api/internal/handler/httpx"
 	"github.com/tarlrsk/expense-tracker/api/internal/registry"
@@ -43,6 +44,8 @@ type apiEnv struct {
 	// mail is the API's mailer; deps and db are its wiring, for tests that run a use case
 	// without HTTP (the operator command).
 	mail *sendtest.Fake
+	// ai is the API's AI parser; tests set its answer and see the requests it received.
+	ai   *parsetest.Fake
 	deps registry.Deps
 	db   *db.DB
 }
@@ -82,9 +85,9 @@ func newAPIEnv(t *testing.T, opts ...func(*registry.Deps)) *apiEnv {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 
-	mailer := sendtest.New()
+	mailer, aiParser := sendtest.New(), parsetest.New()
 	deps := newDeps(config.Config{RequestTimeout: 20 * time.Second, WebBaseURL: testWebBaseURL, AppTimeZone: testZone(t)},
-		logger, database, mailer)
+		logger, database, mailer, aiParser)
 	for _, opt := range opts {
 		opt(&deps)
 	}
@@ -92,7 +95,7 @@ func newAPIEnv(t *testing.T, opts ...func(*registry.Deps)) *apiEnv {
 	if err != nil {
 		t.Fatalf("newEngine: %v", err)
 	}
-	e := &apiEnv{t: t, engine: engine, super: dbtest.DB(t), ip: randomIP(t), logs: logs, mail: mailer, deps: deps, db: database}
+	e := &apiEnv{t: t, engine: engine, super: dbtest.DB(t), ip: randomIP(t), logs: logs, mail: mailer, ai: aiParser, deps: deps, db: database}
 	t.Cleanup(func() { e.exec("delete from login_attempts where ip = $1::inet", e.ip) })
 	return e
 }

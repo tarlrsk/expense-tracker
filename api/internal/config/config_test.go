@@ -18,7 +18,7 @@ const testURL = "postgres://app_login:pw-secret-123@db.example.com/app?sslmode=r
 var settings = []string{
 	"API_ADDR", "REQUEST_TIMEOUT", "LOG_LEVEL", "DATABASE_URL", "DB_STATEMENT_TIMEOUT", "DB_MAX_OPEN_CONNS",
 	"SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_TLS", "WEB_BASE_URL",
-	"APP_TIME_ZONE",
+	"APP_TIME_ZONE", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "AI_TIMEOUT",
 }
 
 // mustZone loads an IANA time zone.
@@ -33,6 +33,8 @@ func mustZone(t *testing.T, name string) *time.Location {
 
 const smtpPassword = "smtp-secret-456" //nolint:gosec // fake credentials
 
+const anthropicKey = "sk-ant-test-secret-789" //nolint:gosec // fake credentials
+
 func TestLoad(t *testing.T) {
 	// defaults is the result with only DATABASE_URL set.
 	defaults := Config{
@@ -40,6 +42,7 @@ func TestLoad(t *testing.T) {
 		DatabaseURL: testURL, DBStatementTimeout: 20 * time.Second, DBMaxOpenConns: 10,
 		SMTP:       SMTP{Host: "127.0.0.1", Port: 1025, From: "Satang <noreply@localhost>", TLS: SMTPTLSNone},
 		WebBaseURL: "http://127.0.0.1:5173", AppTimeZone: mustZone(t, "Asia/Bangkok"),
+		AI: AI{Model: "claude-haiku-4-5", Timeout: 20 * time.Second},
 	}
 	with := func(change func(*Config)) Config {
 		c := defaults
@@ -82,8 +85,10 @@ func TestLoad(t *testing.T) {
 		{name: "error level", env: env("LOG_LEVEL", "error"), want: with(func(c *Config) { c.LogLevel = slog.LevelError })},
 		{
 			name: "statement timeout just under the request timeout",
-			env:  env("REQUEST_TIMEOUT", "10s", "DB_STATEMENT_TIMEOUT", "9999ms"),
-			want: with(func(c *Config) { c.RequestTimeout, c.DBStatementTimeout = 10*time.Second, 9999*time.Millisecond }),
+			env:  env("REQUEST_TIMEOUT", "10s", "DB_STATEMENT_TIMEOUT", "9999ms", "AI_TIMEOUT", "5s"),
+			want: with(func(c *Config) {
+				c.RequestTimeout, c.DBStatementTimeout, c.AI.Timeout = 10*time.Second, 9999*time.Millisecond, 5*time.Second
+			}),
 		},
 		{name: "timeout over 60s", env: env("REQUEST_TIMEOUT", "61s"), wantErr: "REQUEST_TIMEOUT"},
 		{name: "timeout zero", env: env("REQUEST_TIMEOUT", "0s"), wantErr: "REQUEST_TIMEOUT"},
@@ -167,6 +172,30 @@ func TestLoad(t *testing.T) {
 		{name: "app time zone an offset", env: env("APP_TIME_ZONE", "+07:00"), wantErr: "APP_TIME_ZONE"},
 		{name: "app time zone a path", env: env("APP_TIME_ZONE", "../../etc/passwd"), wantErr: "APP_TIME_ZONE"},
 		{name: "app time zone of the machine", env: env("APP_TIME_ZONE", "Local"), wantErr: "APP_TIME_ZONE"},
+		{
+			name: "ai all set", env: env("ANTHROPIC_API_KEY", anthropicKey, "ANTHROPIC_MODEL", "claude-sonnet-5-5", "AI_TIMEOUT", "15s"),
+			want: with(func(c *Config) {
+				c.AI = AI{APIKey: anthropicKey, Model: "claude-sonnet-5-5", Timeout: 15 * time.Second}
+			}),
+		},
+		{
+			name: "ai timeout just under the request timeout", env: env("REQUEST_TIMEOUT", "10s", "DB_STATEMENT_TIMEOUT", "5s", "AI_TIMEOUT", "9999ms"),
+			want: with(func(c *Config) {
+				c.RequestTimeout, c.DBStatementTimeout, c.AI.Timeout = 10*time.Second, 5*time.Second, 9999*time.Millisecond
+			}),
+		},
+		{name: "ai timeout zero", env: env("AI_TIMEOUT", "0s"), wantErr: "AI_TIMEOUT"},
+		{name: "ai timeout negative", env: env("AI_TIMEOUT", "-1s"), wantErr: "AI_TIMEOUT"},
+		{name: "ai timeout not a duration", env: env("AI_TIMEOUT", "20"), wantErr: "AI_TIMEOUT"},
+		{name: "ai timeout equal to request timeout", env: env("AI_TIMEOUT", "50s"), wantErr: "less than REQUEST_TIMEOUT"},
+		{
+			name: "ai timeout over a shorter request timeout", env: env("REQUEST_TIMEOUT", "10s", "AI_TIMEOUT", "20s"),
+			wantErr: "less than REQUEST_TIMEOUT",
+		},
+		{
+			name: "ai key does not leak into other errors", env: env("ANTHROPIC_API_KEY", anthropicKey, "AI_TIMEOUT", "0s"),
+			wantErr: "AI_TIMEOUT",
+		},
 		{name: "pool size zero", env: env("DB_MAX_OPEN_CONNS", "0"), wantErr: "DB_MAX_OPEN_CONNS"},
 		{name: "pool size not a number", env: env("DB_MAX_OPEN_CONNS", "ten"), wantErr: "DB_MAX_OPEN_CONNS"},
 	}
@@ -183,7 +212,8 @@ func TestLoad(t *testing.T) {
 				if !strings.Contains(err.Error(), tt.wantErr) {
 					t.Errorf("error = %v, want it to mention %q", err, tt.wantErr)
 				}
-				if strings.Contains(err.Error(), "pw-secret-123") || strings.Contains(err.Error(), smtpPassword) {
+				if strings.Contains(err.Error(), "pw-secret-123") || strings.Contains(err.Error(), smtpPassword) ||
+					strings.Contains(err.Error(), anthropicKey) {
 					t.Errorf("error leaks a secret: %v", err)
 				}
 				return
@@ -203,16 +233,17 @@ func TestLoad(t *testing.T) {
 	}
 }
 
-// The database URL and the SMTP password never show in printed or logged config.
+// The database URL, the SMTP password and the Anthropic key never show in printed or logged
+// config.
 func TestSecretIsHidden(t *testing.T) {
-	cfg := Config{DatabaseURL: testURL, SMTP: SMTP{Password: smtpPassword}}
+	cfg := Config{DatabaseURL: testURL, SMTP: SMTP{Password: smtpPassword}, AI: AI{APIKey: anthropicKey}}
 	var log strings.Builder
 	slog.New(slog.NewTextHandler(&log, nil)).Info("config", slog.Any("cfg", cfg), slog.Any("url", cfg.DatabaseURL))
 	for _, out := range []string{
 		fmt.Sprintf("%v", cfg), fmt.Sprintf("%+v", cfg), fmt.Sprintf("%#v", cfg), fmt.Sprintf("url=%s", cfg.DatabaseURL),
-		fmt.Sprintf("%+v", cfg.SMTP), log.String(),
+		fmt.Sprintf("%+v", cfg.SMTP), fmt.Sprintf("%#v", cfg.AI), log.String(),
 	} {
-		if strings.Contains(out, "pw-secret-123") || strings.Contains(out, smtpPassword) {
+		if strings.Contains(out, "pw-secret-123") || strings.Contains(out, smtpPassword) || strings.Contains(out, anthropicKey) {
 			t.Errorf("secret printed: %s", out)
 		}
 	}
