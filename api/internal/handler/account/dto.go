@@ -27,12 +27,15 @@ type profileResponse struct {
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
 	Role        string    `json:"role"`
-	CreatedAt   time.Time `json:"created_at"`
+	// DescriptionStyle is as_typed, light_tidy or clean_name (ADR-0081).
+	DescriptionStyle string    `json:"description_style"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 func newProfileResponse(p accountgetprofileport.Profile) profileResponse {
 	return profileResponse{
-		ID: p.ID, Email: p.Email, DisplayName: p.DisplayName, Role: string(p.Role), CreatedAt: p.CreatedAt.UTC(),
+		ID: p.ID, Email: p.Email, DisplayName: p.DisplayName, Role: string(p.Role),
+		DescriptionStyle: string(p.DescriptionStyle), CreatedAt: p.CreatedAt.UTC(),
 	}
 }
 

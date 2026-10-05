@@ -522,6 +522,86 @@ func TestEntryParseLimit(t *testing.T) {
 	})
 }
 
+// The AI gets the caller's own description style from their profile (ADR-0081, PLAN-0003 T7);
+// the request body carries none, and one user's setting never reaches another's parse.
+func TestEntryParseDescriptionStyle(t *testing.T) {
+	e := newAPIEnv(t, withClock(entryClock))
+	a, b := e.newAccount(accountOpts{}), e.newAccount(accountOpts{})
+	aTok, bTok := e.freshSession(a.id), e.freshSession(b.id)
+	e.ai.RespondWith(aiparse.Response{})
+	// styleSent parses as tok and returns the style the fake AI received.
+	styleSent := func(t *testing.T, tok string) aiparse.Style {
+		t.Helper()
+		n := len(e.ai.Requests())
+		if got := e.mustParseText(tok, "กาแฟ amazon 60"); got.AI != "used" {
+			t.Fatalf("ai %q, want used", got.AI)
+		}
+		reqs := e.newAIRequests(n)
+		if len(reqs) != 1 {
+			t.Fatalf("the AI got %d requests", len(reqs))
+		}
+		return reqs[0].Style
+	}
+	setStyle := func(t *testing.T, tok, style string) {
+		t.Helper()
+		rec := e.do(http.MethodPatch, "/api/me", tok, `{"description_style":"`+style+`"}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PATCH /api/me %s: %d %s", style, rec.Code, rec.Body.String())
+		}
+	}
+
+	t.Run("a new account: as typed", func(t *testing.T) {
+		if got := styleSent(t, aTok); got != aiparse.StyleAsTyped {
+			t.Errorf("style %q, want as_typed", got)
+		}
+	})
+
+	for _, style := range []aiparse.Style{aiparse.StyleCleanName, aiparse.StyleLightTidy, aiparse.StyleAsTyped} {
+		t.Run("the caller's setting is sent: "+string(style), func(t *testing.T) {
+			setStyle(t, aTok, string(style))
+			if got := styleSent(t, aTok); got != style {
+				t.Errorf("style %q, want %q", got, style)
+			}
+		})
+	}
+
+	t.Run("cross-user: A's clean_name does not reach B's parse, nor B's light_tidy A's", func(t *testing.T) {
+		setStyle(t, aTok, "clean_name")
+		if got := styleSent(t, bTok); got != aiparse.StyleAsTyped {
+			t.Errorf("B's style %q, want as_typed", got)
+		}
+		setStyle(t, bTok, "light_tidy")
+		if got := styleSent(t, aTok); got != aiparse.StyleCleanName {
+			t.Errorf("A's style %q, want clean_name", got)
+		}
+		if got := styleSent(t, bTok); got != aiparse.StyleLightTidy {
+			t.Errorf("B's style %q, want light_tidy", got)
+		}
+	})
+
+	t.Run("a style in the request body is refused and changes nothing", func(t *testing.T) {
+		n := len(e.ai.Requests())
+		for _, body := range []string{
+			`{"text":"กาแฟ amazon 60","style":"as_typed"}`,
+			`{"text":"กาแฟ amazon 60","description_style":"as_typed"}`,
+		} {
+			assertBadRequest(t, body, e.postParse(aTok, body), "")
+		}
+		if len(e.ai.Requests()) != n {
+			t.Error("the AI was called")
+		}
+		if got := e.descriptionStyle(a); got != "clean_name" {
+			t.Errorf("A's stored style %q, want clean_name", got)
+		}
+	})
+
+	t.Run("the AI is never called inside a transaction", func(t *testing.T) {
+		if n := e.ai.RefusedInside(); n != 0 {
+			t.Errorf("%d AI calls were made inside a transaction", n)
+		}
+	})
+}
+
 // User B's rules, categories and usage never reach user A's proposals or limit.
 func TestEntryParseCrossUser(t *testing.T) {
 	e := newAPIEnv(t, withClock(entryClock), withParseLimit(1))

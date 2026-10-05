@@ -17,7 +17,7 @@ type pg struct{}
 func NewPG() Port { return pg{} }
 
 const getSQL = `
-select u.id, u.email::text as email, p.display_name, p.role, u.created_at
+select u.id, u.email::text as email, p.display_name, p.role, p.description_style, u.created_at
 from users u
 join profiles p on p.id = u.id
 where u.id = ?`
@@ -27,6 +27,7 @@ type row struct {
 	Email       string    `gorm:"column:email"`
 	DisplayName string    `gorm:"column:display_name"`
 	Role        string    `gorm:"column:role"`
+	Style       string    `gorm:"column:description_style"`
 	CreatedAt   time.Time `gorm:"column:created_at"`
 }
 
@@ -43,5 +44,8 @@ func (pg) Get(ctx context.Context, userID uuid.UUID) (Profile, bool, error) {
 	if res.RowsAffected == 0 {
 		return Profile{}, false, nil
 	}
-	return Profile{ID: r.ID, Email: r.Email, DisplayName: r.DisplayName, Role: domain.Role(r.Role), CreatedAt: r.CreatedAt}, true, nil
+	return Profile{
+		ID: r.ID, Email: r.Email, DisplayName: r.DisplayName, Role: domain.Role(r.Role),
+		DescriptionStyle: domain.DescriptionStyle(r.Style), CreatedAt: r.CreatedAt,
+	}, true, nil
 }

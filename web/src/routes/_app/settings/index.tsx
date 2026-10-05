@@ -1,11 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
-import { ChevronRightIcon, KeyRoundIcon, TagsIcon, UsersIcon } from 'lucide-react'
-import { useState } from 'react'
+import {
+  CheckIcon,
+  ChevronRightIcon,
+  KeyRoundIcon,
+  SparklesIcon,
+  TagsIcon,
+  UsersIcon,
+} from 'lucide-react'
+import { useId, useState } from 'react'
 import type { SubmitEvent } from 'react'
 
 import { changePassword, deleteMe, updateMe } from '@/api/me'
-import type { Profile } from '@/api/types'
+import { descriptionStyles } from '@/api/types'
+import type { DescriptionStyle, Profile } from '@/api/types'
 import { FormSheet, PageTitle } from '@/components/layout'
 import { FormAlert, Notice } from '@/components/messages'
 import { TextField } from '@/components/text-field'
@@ -89,6 +97,7 @@ function SettingsContent({
 }) {
   const [changeOpen, setChangeOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [styleOpen, setStyleOpen] = useState(false)
   // A new key for each opening, so a sheet's form always starts empty.
   const [sheetKey, setSheetKey] = useState(0)
   const queryClient = useQueryClient()
@@ -119,6 +128,26 @@ function SettingsContent({
             </span>
             <ChevronRightIcon aria-hidden="true" className="size-5 text-muted-foreground" />
           </Link>
+        </li>
+        <li>
+          <button
+            type="button"
+            className="flex min-h-14 w-full items-center gap-3 py-3 text-left text-base select-none"
+            onClick={() => {
+              onNotice(null)
+              setSheetKey((k) => k + 1)
+              setStyleOpen(true)
+            }}
+          >
+            <SparklesIcon aria-hidden="true" className="size-5 text-muted-foreground" />
+            <span className="flex flex-1 flex-col">
+              <span>{t.descriptionStyle}</span>
+              <span className="text-sm text-muted-foreground">
+                {t.descriptionStyles[profile.description_style].label}
+              </span>
+            </span>
+            <ChevronRightIcon aria-hidden="true" className="size-5 text-muted-foreground" />
+          </button>
         </li>
         <li>
           <button
@@ -177,6 +206,16 @@ function SettingsContent({
         </Button>
       </div>
 
+      <DescriptionStyleSheet
+        key={`style-${String(sheetKey)}`}
+        open={styleOpen}
+        onOpenChange={setStyleOpen}
+        saved={profile.description_style}
+        onSaved={() => {
+          setStyleOpen(false)
+          onNotice(t.descriptionStyleSaved)
+        }}
+      />
       <ChangePasswordSheet
         key={`change-${String(sheetKey)}`}
         open={changeOpen}
@@ -293,6 +332,119 @@ function HiddenUsername({ email }: { email: string }) {
       hidden
       tabIndex={-1}
     />
+  )
+}
+
+/**
+ * Choosing the description style (ADR-0081): three native radio options; tapping one saves it at
+ * once. Tapping the one already saved just closes the sheet.
+ */
+function DescriptionStyleSheet({
+  open,
+  onOpenChange,
+  saved,
+  onSaved,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  saved: DescriptionStyle
+  onSaved: () => void
+}) {
+  const queryClient = useQueryClient()
+  // The option shown as checked: the tapped one while it saves, the saved one otherwise.
+  const [selected, setSelected] = useState<DescriptionStyle>(saved)
+  const name = useId()
+
+  const mutation = useMutation({
+    mutationFn: updateMe,
+    onSuccess: (updated) => {
+      queryClient.setQueryData(meQuery.queryKey, updated)
+      onSaved()
+    },
+    onError: () => {
+      setSelected(saved)
+    },
+  })
+
+  function choose(style: DescriptionStyle) {
+    if (mutation.isPending) {
+      return
+    }
+    if (style === saved) {
+      onOpenChange(false)
+      return
+    }
+    setSelected(style)
+    mutation.mutate({ description_style: style })
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent>
+        <div className="flex flex-col gap-6">
+          <SheetHeader>
+            <SheetTitle>{t.descriptionStyleTitle}</SheetTitle>
+            <SheetDescription>{t.descriptionStyleIntro}</SheetDescription>
+          </SheetHeader>
+          <fieldset
+            disabled={mutation.isPending}
+            aria-busy={mutation.isPending}
+            className="flex min-w-0 flex-col gap-2"
+          >
+            <legend className="sr-only">{t.descriptionStyle}</legend>
+            {descriptionStyles.map((style) => {
+              const option = t.descriptionStyles[style]
+              const checked = selected === style
+              return (
+                <label
+                  key={style}
+                  className="flex min-h-14 min-w-0 items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 select-none has-checked:border-primary has-checked:bg-primary/8 has-checked:ring-2 has-checked:ring-primary has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ring has-disabled:opacity-60"
+                >
+                  <input
+                    type="radio"
+                    name={name}
+                    value={style}
+                    checked={checked}
+                    aria-labelledby={`${name}-${style}-label`}
+                    aria-describedby={`${name}-${style}-example`}
+                    // A click on the option already checked fires no change: it closes the sheet.
+                    onClick={() => {
+                      if (checked) {
+                        choose(style)
+                      }
+                    }}
+                    onChange={() => {
+                      choose(style)
+                    }}
+                    className="sr-only"
+                  />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span id={`${name}-${style}-label`} className="text-base">
+                      {option.label}
+                    </span>
+                    <span
+                      id={`${name}-${style}-example`}
+                      className="text-sm [overflow-wrap:anywhere] text-muted-foreground"
+                    >
+                      {t.descriptionStyleExampleInput} <span aria-hidden="true">→</span>
+                      <span className="sr-only">{t.descriptionStyleExampleBecomes}</span>{' '}
+                      {option.example}
+                    </span>
+                  </span>
+                  <CheckIcon
+                    aria-hidden="true"
+                    className={
+                      checked ? 'size-5 shrink-0 text-primary' : 'invisible size-5 shrink-0'
+                    }
+                  />
+                </label>
+              )
+            })}
+          </fieldset>
+          {mutation.isError && <FormAlert>{errorText(mutation.error)}</FormAlert>}
+        </div>
+      </SheetContent>
+    </Sheet>
   )
 }
 

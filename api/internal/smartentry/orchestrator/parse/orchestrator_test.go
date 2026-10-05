@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	accountdomain "github.com/tarlrsk/expense-tracker/api/internal/account/domain"
 	"github.com/tarlrsk/expense-tracker/api/internal/apperr"
 	categoriesdomain "github.com/tarlrsk/expense-tracker/api/internal/categories/domain"
 	categorizationdomain "github.com/tarlrsk/expense-tracker/api/internal/categorization/domain"
@@ -61,12 +62,13 @@ func amount(s string) transactionsdomain.Amount {
 }
 
 // env is the orchestrator with fake processors and the fake AI. The local parser answers items;
-// the reservation answers reserved; rules maps merchant keys to categories.
+// the reservation answers reserved, with style; rules maps merchant keys to categories.
 type env struct {
 	t        *testing.T
 	user     uuid.UUID
 	items    []smartentryparseproc.Item
 	reserved bool
+	style    accountdomain.DescriptionStyle
 	cats     []categoriesdomain.Category
 	rules    map[string]uuid.UUID
 	ai       *parsetest.Fake
@@ -76,7 +78,10 @@ type env struct {
 }
 
 func newEnv(t *testing.T) *env {
-	return &env{t: t, user: uuid.New(), reserved: true, rules: map[string]uuid.UUID{}, ai: parsetest.New(), logs: &bytes.Buffer{}}
+	return &env{
+		t: t, user: uuid.New(), reserved: true, style: accountdomain.DescriptionStyleAsTyped, rules: map[string]uuid.UUID{},
+		ai: parsetest.New(), logs: &bytes.Buffer{},
+	}
 }
 
 func (e *env) orchestrator() Orchestrator {
@@ -100,7 +105,11 @@ func (e *env) orchestrator() Orchestrator {
 			if req.UserID != e.user {
 				e.t.Errorf("reserve for %s", req.UserID)
 			}
-			return smartentryreserveproc.Response{Reserved: e.reserved, Day: date("2026-10-04"), Categories: e.cats}, nil
+			resp := smartentryreserveproc.Response{Reserved: e.reserved, Day: date("2026-10-04")}
+			if e.reserved {
+				resp.Categories, resp.DescriptionStyle = e.cats, e.style
+			}
+			return resp, nil
 		}),
 		matchFn(func(ctx context.Context, req smartentrymatchrulesproc.Request) (smartentrymatchrulesproc.Response, error) {
 			inTx(ctx, "match")
@@ -250,16 +259,27 @@ func TestExecute(t *testing.T) {
 		}
 	})
 
-	t.Run("the style is passed on", func(t *testing.T) {
-		e := newEnv(t)
-		e.items = []smartentryparseproc.Item{coffee}
-		if _, err := e.orchestrator().Execute(t.Context(), Request{UserID: e.user, Text: "x", Style: aiparse.StyleCleanName}); err != nil {
-			t.Fatal(err)
-		}
-		if r := e.ai.Requests(); len(r) != 1 || r[0].Style != aiparse.StyleCleanName {
-			t.Errorf("AI requests %+v", r)
-		}
-	})
+	for _, tt := range []struct {
+		style accountdomain.DescriptionStyle
+		want  aiparse.Style
+	}{
+		{accountdomain.DescriptionStyleAsTyped, aiparse.StyleAsTyped},
+		{accountdomain.DescriptionStyleLightTidy, aiparse.StyleLightTidy},
+		{accountdomain.DescriptionStyleCleanName, aiparse.StyleCleanName},
+		{"", aiparse.StyleAsTyped},
+	} {
+		t.Run("the caller's style from the reservation is passed on: "+string(tt.style), func(t *testing.T) {
+			e := newEnv(t)
+			e.items = []smartentryparseproc.Item{coffee}
+			e.style = tt.style
+			if _, err := e.orchestrator().Execute(t.Context(), Request{UserID: e.user, Text: "x"}); err != nil {
+				t.Fatal(err)
+			}
+			if r := e.ai.Requests(); len(r) != 1 || r[0].Style != tt.want {
+				t.Errorf("AI requests %+v, want style %q", r, tt.want)
+			}
+		})
+	}
 
 	for _, tt := range []struct {
 		name string

@@ -92,6 +92,11 @@ func table(name string) presence {
 		where relnamespace = 'public'::regnamespace and relkind = 'r' and relname = '` + name + `'`}
 }
 
+func column(tableName, name string) presence {
+	return presence{"column " + tableName + "." + name, `select count(*) from pg_attribute
+		where attrelid = to_regclass('public.` + tableName + `') and attname = '` + name + `' and not attisdropped`}
+}
+
 var (
 	anyTable = presence{"any table", `select count(*) from pg_class where relnamespace = 'public'::regnamespace
 		and relkind = 'r' and relname <> 'goose_db_version'`}
@@ -115,6 +120,10 @@ func appRoles(roles testRoles) presence {
 // checked by checkNoLeftovers.
 func afterDown(roles testRoles) map[int64]struct{ gone, kept []presence } {
 	return map[int64]struct{ gone, kept []presence }{
+		7: {
+			gone: []presence{column("profiles", "description_style")},
+			kept: []presence{table("profiles"), column("profiles", "display_name"), table("ai_usage")},
+		},
 		6: {
 			gone: []presence{table("ai_usage")},
 			kept: []presence{table("merchant_rules"), table("transactions"), table("users")},

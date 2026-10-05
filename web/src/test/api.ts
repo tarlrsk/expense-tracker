@@ -82,6 +82,7 @@ export const profile = {
   email: 'kanya@example.com',
   display_name: 'Kanya',
   role: 'user',
+  description_style: 'as_typed',
   created_at: '2026-10-01T03:00:00Z',
 }
 

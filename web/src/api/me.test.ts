@@ -25,8 +25,20 @@ describe('getMe', () => {
     expect(api.callsTo('GET /api/me')[0]?.headers.get('Authorization')).toBe('Bearer tok')
   })
 
+  it.each(['as_typed', 'light_tidy', 'clean_name'] as const)(
+    'reads the description style %s',
+    async (style) => {
+      api.on('GET /api/me', () => json(200, { ...profile, description_style: style }))
+
+      await expect(getMe()).resolves.toMatchObject({ description_style: style })
+    },
+  )
+
   it.each([
     { name: 'an unknown role', body: { ...profile, role: 'admin' } },
+    { name: 'an unknown description style', body: { ...profile, description_style: 'fancy' } },
+    { name: 'no description style', body: { ...profile, description_style: undefined } },
+    { name: 'a null description style', body: { ...profile, description_style: null } },
     { name: 'no email', body: { ...profile, email: undefined } },
     { name: 'a null display name', body: { ...profile, display_name: null } },
     { name: 'no id', body: { ...profile, id: '' } },
@@ -46,6 +58,15 @@ describe('updateMe', () => {
     await expect(updateMe({ display_name: 'Kan' })).resolves.toEqual(updated)
 
     expect(api.callsTo('PATCH /api/me')[0]?.body).toEqual({ display_name: 'Kan' })
+  })
+
+  it('patches only the description style and returns the profile', async () => {
+    const updated = { ...profile, description_style: 'clean_name' }
+    api.on('PATCH /api/me', () => json(200, updated))
+
+    await expect(updateMe({ description_style: 'clean_name' })).resolves.toEqual(updated)
+
+    expect(api.callsTo('PATCH /api/me')[0]?.body).toEqual({ description_style: 'clean_name' })
   })
 
   it('passes a rule error through', async () => {

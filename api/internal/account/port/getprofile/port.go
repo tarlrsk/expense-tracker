@@ -17,7 +17,9 @@ type Profile struct {
 	Email       string
 	DisplayName string
 	Role        domain.Role
-	CreatedAt   time.Time
+	// DescriptionStyle is how freely the AI may write a description (ADR-0081).
+	DescriptionStyle domain.DescriptionStyle
+	CreatedAt        time.Time
 }
 
 // Port reads profiles.

@@ -11,6 +11,10 @@ export interface HealthResponse {
 export const roles = ['user', 'operator'] as const
 export type Role = (typeof roles)[number]
 
+/** How freely the AI may write an entry's description (ADR-0081); `as_typed` is the default. */
+export const descriptionStyles = ['as_typed', 'light_tidy', 'clean_name'] as const
+export type DescriptionStyle = (typeof descriptionStyles)[number]
+
 export const userStatuses = ['invited', 'active'] as const
 export type UserStatus = (typeof userStatuses)[number]
 
@@ -38,12 +42,15 @@ export interface Profile {
   /** Empty when the user has not set one. */
   display_name: string
   role: Role
+  description_style: DescriptionStyle
   created_at: string
 }
 
+/** Body of PATCH /api/me: only the fields sent change. */
 export interface UpdateMeRequest {
   /** 0 to 50 characters, trimmed by the API. */
-  display_name: string
+  display_name?: string
+  description_style?: DescriptionStyle
 }
 
 export interface DeleteMeRequest {

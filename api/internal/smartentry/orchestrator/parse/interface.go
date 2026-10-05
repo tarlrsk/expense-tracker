@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 
-	aiparse "github.com/tarlrsk/expense-tracker/api/internal/external/ai/parse"
 	"github.com/tarlrsk/expense-tracker/api/internal/smartentry/domain"
 	transactionsdomain "github.com/tarlrsk/expense-tracker/api/internal/transactions/domain"
 )
@@ -23,12 +22,11 @@ type Orchestrator interface {
 	Execute(ctx context.Context, req Request) (Response, error)
 }
 
-// Request is the caller, the text they typed and the description style for the AI ("" is
-// as typed; PLAN-0003 T7 passes the caller's setting).
+// Request is the caller and the text they typed. The description style for the AI is the
+// caller's own setting, read when the use is reserved (ADR-0081, PLAN-0003 T7).
 type Request struct {
 	UserID uuid.UUID
 	Text   string
-	Style  aiparse.Style
 }
 
 // Response is the proposals in the order typed, and what the AI did.

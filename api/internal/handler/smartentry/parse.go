@@ -37,7 +37,8 @@ type parseItem struct {
 }
 
 // Parse handles POST /api/entry/parse (authed): 200 with the proposals; nothing is saved. The
-// description style is the default until PLAN-0003 T7.
+// description style is not part of the request: the API reads the caller's own setting
+// (ADR-0081).
 func Parse(o smartentryparseorch.Orchestrator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		caller, ok := httpx.MustCaller(c)

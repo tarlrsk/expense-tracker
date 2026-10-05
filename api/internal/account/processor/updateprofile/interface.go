@@ -1,5 +1,6 @@
-// Package updateprofile changes the caller's own profile (PATCH /api/me): the display name only.
-// A user can never change their role or email (ADR-0056, ADR-0068).
+// Package updateprofile changes the caller's own profile (PATCH /api/me): the display name and
+// the description style (ADR-0081). A user can never change their role or email (ADR-0056,
+// ADR-0068).
 package updateprofile
 
 import (
@@ -13,7 +14,8 @@ import (
 // Processor updates a profile.
 type Processor interface {
 	// Execute writes the fields that are set and returns the whole profile, or invalid_input
-	// (display name too long) or unauthenticated (the account is gone).
+	// (display name too long, unknown description style; then nothing is written) or
+	// unauthenticated (the account is gone).
 	Execute(ctx context.Context, req Request) (Response, error)
 }
 
@@ -21,6 +23,8 @@ type Processor interface {
 type Request struct {
 	UserID      uuid.UUID
 	DisplayName *string
+	// DescriptionStyle is as_typed, light_tidy or clean_name.
+	DescriptionStyle *string
 }
 
 // Response is the profile after the change.

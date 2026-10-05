@@ -2,7 +2,7 @@
 
 import { apiRequest } from './client'
 import { nonEmptyString, object, oneOf, string, timestamp } from './shape'
-import { roles } from './types'
+import { descriptionStyles, roles } from './types'
 import type { ChangePasswordRequest, DeleteMeRequest, Profile, UpdateMeRequest } from './types'
 
 export function parseProfile(body: unknown): Profile {
@@ -12,6 +12,7 @@ export function parseProfile(body: unknown): Profile {
     email: string(o, 'email'),
     display_name: string(o, 'display_name'),
     role: oneOf(o, 'role', roles),
+    description_style: oneOf(o, 'description_style', descriptionStyles),
     created_at: timestamp(o, 'created_at'),
   }
 }

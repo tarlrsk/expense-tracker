@@ -64,6 +64,101 @@ describe('Settings', () => {
     )
   })
 
+  it('shows the saved description style on its row', async () => {
+    api.on('GET /api/me', () => json(200, { ...profile, description_style: 'light_tidy' }))
+    openSettings()
+
+    const row = await screen.findByRole('button', { name: /Description style/ })
+    expect(row).toHaveTextContent('Light tidy')
+  })
+
+  it('saves a description style at once, updates the row and closes the sheet', async () => {
+    api.on('PATCH /api/me', () => json(200, { ...profile, description_style: 'clean_name' }))
+    const { user } = openSettings()
+
+    const row = await screen.findByRole('button', { name: /Description style/ })
+    expect(row).toHaveTextContent('As typed')
+    await user.click(row)
+    const sheet = await screen.findByRole('dialog', { name: 'Description style' })
+    expect(sheet).toHaveTextContent(/Entries your own rules match stay as typed/)
+    expect(within(sheet).getByRole('radio', { name: 'As typed' })).toBeChecked()
+    expect(within(sheet).getByRole('radio', { name: 'As typed' })).toHaveAccessibleDescription(
+      'กาแฟ amazon 60 becomes กาแฟ amazon',
+    )
+    expect(within(sheet).getByRole('radio', { name: 'Light tidy' })).toHaveAccessibleDescription(
+      'กาแฟ amazon 60 becomes กาแฟ Amazon',
+    )
+    const clean = within(sheet).getByRole('radio', { name: 'Clean name' })
+    expect(clean).toHaveAccessibleDescription('กาแฟ amazon 60 becomes Café Amazon')
+    await user.click(clean)
+
+    expect(await screen.findByText('Description style saved.')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+    expect(api.callsTo('PATCH /api/me')).toHaveLength(1)
+    expect(api.callsTo('PATCH /api/me')[0]?.body).toEqual({ description_style: 'clean_name' })
+    expect(screen.getByRole('button', { name: /Description style/ })).toHaveTextContent(
+      'Clean name',
+    )
+  })
+
+  it('disables the options while saving', async () => {
+    let answer: (r: Response) => void = () => undefined
+    api.on(
+      'PATCH /api/me',
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve
+        }),
+    )
+    const { user } = openSettings()
+
+    await user.click(await screen.findByRole('button', { name: /Description style/ }))
+    const sheet = await screen.findByRole('dialog', { name: 'Description style' })
+    await user.click(within(sheet).getByRole('radio', { name: 'Light tidy' }))
+
+    await waitFor(() => {
+      expect(within(sheet).getByRole('radio', { name: 'Light tidy' })).toBeDisabled()
+    })
+    expect(within(sheet).getByRole('radio', { name: 'Light tidy' })).toBeChecked()
+    expect(within(sheet).getByRole('radio', { name: 'As typed' })).toBeDisabled()
+    answer(json(200, { ...profile, description_style: 'light_tidy' }))
+
+    expect(await screen.findByText('Description style saved.')).toBeInTheDocument()
+  })
+
+  it('keeps the sheet open with the error and the saved choice when saving fails', async () => {
+    api.on('PATCH /api/me', () => apiError(500, 'internal', 'something went wrong'))
+    const { user } = openSettings()
+
+    await user.click(await screen.findByRole('button', { name: /Description style/ }))
+    const sheet = await screen.findByRole('dialog', { name: 'Description style' })
+    await user.click(within(sheet).getByRole('radio', { name: 'Clean name' }))
+
+    expect(await within(sheet).findByRole('alert')).toBeInTheDocument()
+    expect(within(sheet).getByRole('radio', { name: 'As typed' })).toBeChecked()
+    expect(within(sheet).getByRole('radio', { name: 'Clean name' })).not.toBeChecked()
+    expect(within(sheet).getByRole('radio', { name: 'Clean name' })).toBeEnabled()
+    expect(screen.getByRole('dialog', { name: 'Description style' })).toBeInTheDocument()
+    expect(screen.queryByText('Description style saved.')).toBeNull()
+  })
+
+  it('closes without saving when the saved choice is tapped', async () => {
+    api.on('GET /api/me', () => json(200, { ...profile, description_style: 'light_tidy' }))
+    const { user } = openSettings()
+
+    await user.click(await screen.findByRole('button', { name: /Description style/ }))
+    const sheet = await screen.findByRole('dialog', { name: 'Description style' })
+    await user.click(within(sheet).getByRole('radio', { name: 'Light tidy' }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+    expect(api.callsTo('PATCH /api/me')).toHaveLength(0)
+    expect(screen.queryByText('Description style saved.')).toBeNull()
+  })
+
   it('changes the password and says other devices were logged out', async () => {
     api.on('POST /api/me/password', () => noContent())
     const { user } = openSettings()

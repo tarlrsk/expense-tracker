@@ -37,7 +37,8 @@ func New(parse smartentryparseproc.Processor, reserve smartentryreserveproc.Proc
 // Execute runs, each step in its own user transaction and the AI call between them (ADR-0032):
 //  1. the local parse with its rule lookup; when every item is resolved, nothing else runs;
 //  2. when the AI is configured, the reservation of one use toward the daily limit, committed
-//     before the call so a failed call still counts, with the caller's active categories;
+//     before the call so a failed call still counts, with the caller's active categories and
+//     description style;
 //  3. the AI call with only the unresolved items, as numbered lines, each with the day the
 //     parser worked out for it (today when it could not decide);
 //  4. the checks of every AI item (ADR-0071), then the caller's merchant rules over the AI's
@@ -94,7 +95,8 @@ func (o *orchestrator) Execute(ctx context.Context, req Request) (Response, erro
 		lines[n] = aiparse.Line{Number: n + 1, Text: local.Items[i].Text, DateIfNone: day.String()}
 	}
 	categories, refs := offer(reserved.Categories)
-	style := req.Style
+	// The account module's style values are the port's own strings (ADR-0081); "" is as typed.
+	style := aiparse.Style(reserved.DescriptionStyle)
 	if style == "" {
 		style = aiparse.StyleAsTyped
 	}

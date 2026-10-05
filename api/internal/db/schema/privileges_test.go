@@ -20,7 +20,8 @@ var grants = map[string]map[string][]string{
 		"app_auth": {"SELECT", "INSERT", "UPDATE", "DELETE"},
 		"app_user": {"SELECT"},
 	},
-	"profiles.display_name": {"app_user": {"UPDATE"}},
+	"profiles.display_name":      {"app_user": {"UPDATE"}},
+	"profiles.description_style": {"app_user": {"UPDATE"}},
 
 	"categories":            {"app_user": {"SELECT", "INSERT"}},
 	"categories.name":       {"app_user": {"UPDATE"}},

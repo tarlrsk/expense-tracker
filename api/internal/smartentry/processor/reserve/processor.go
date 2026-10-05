@@ -5,17 +5,20 @@ import (
 	"fmt"
 	"time"
 
+	accountdomain "github.com/tarlrsk/expense-tracker/api/internal/account/domain"
+	accountgetdescriptionstyleport "github.com/tarlrsk/expense-tracker/api/internal/account/port/getdescriptionstyle"
 	categorieslistport "github.com/tarlrsk/expense-tracker/api/internal/categories/port/list"
 	smartentryreserveport "github.com/tarlrsk/expense-tracker/api/internal/smartentry/port/reserve"
 	transactionsdomain "github.com/tarlrsk/expense-tracker/api/internal/transactions/domain"
 	"github.com/tarlrsk/expense-tracker/api/internal/tx"
 )
 
-// Ports are the queries reserve uses. Categories is the categories module's read port (ADR-0032
-// lets a processor use read ports of earlier modules).
+// Ports are the queries reserve uses. Categories and DescriptionStyle are read ports of the
+// categories and account modules (ADR-0032 lets a processor use read ports of earlier modules).
 type Ports struct {
-	Usage      smartentryreserveport.Port
-	Categories categorieslistport.Port
+	Usage            smartentryreserveport.Port
+	Categories       categorieslistport.Port
+	DescriptionStyle accountgetdescriptionstyleport.Port
 }
 
 type processor struct {
@@ -33,7 +36,9 @@ func New(user tx.User, now func() time.Time, zone *time.Location, limit int, por
 }
 
 // Execute reserves first, so a request at the limit reads nothing more. A failure after the
-// reservation rolls it back with the rest of the transaction.
+// reservation rolls it back with the rest of the transaction. A caller without a profile row gets
+// the default style: the session check has already proved the account, and the parse should not
+// fail over a setting.
 func (p *processor) Execute(ctx context.Context, req Request) (Response, error) {
 	resp := Response{Day: transactionsdomain.Today(p.now(), p.zone)}
 	err := p.user.WithUserTx(ctx, req.UserID, func(ctx context.Context) error {
@@ -45,7 +50,14 @@ func (p *processor) Execute(ctx context.Context, req Request) (Response, error) 
 		if err != nil {
 			return err
 		}
-		resp.Reserved = true
+		style, found, err := p.ports.DescriptionStyle.Get(ctx, req.UserID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			style = accountdomain.DefaultDescriptionStyle
+		}
+		resp.Reserved, resp.DescriptionStyle = true, style
 		for _, c := range all {
 			if !c.Archived {
 				resp.Categories = append(resp.Categories, c)

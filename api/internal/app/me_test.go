@@ -21,6 +21,18 @@ func (e *apiEnv) displayName(a account) string {
 	return name
 }
 
+func (e *apiEnv) descriptionStyle(a account) string {
+	e.t.Helper()
+	var style string
+	if err := e.super.QueryRowContext(e.t.Context(), "select description_style from profiles where id = $1", a.id).Scan(&style); err != nil {
+		e.t.Fatal(err)
+	}
+	return style
+}
+
+// profileKeys are exactly the keys of the body of GET and PATCH /api/me.
+var profileKeys = []string{"id", "email", "display_name", "role", "description_style", "created_at"}
+
 func TestGetMe(t *testing.T) {
 	e := newAPIEnv(t)
 	for _, opts := range []accountOpts{{}, {operator: true}} {
@@ -31,12 +43,13 @@ func TestGetMe(t *testing.T) {
 			t.Fatalf("GET /api/me: %d %s", rec.Code, rec.Body.String())
 		}
 		m := decodeObject(t, rec)
-		assertKeys(t, "profile", m, "id", "email", "display_name", "role", "created_at")
+		assertKeys(t, "profile", m, profileKeys...)
 		wantRole := "user"
 		if opts.operator {
 			wantRole = "operator"
 		}
-		if m["id"] != a.id.String() || m["email"] != a.email || m["display_name"] != "Ann" || m["role"] != wantRole {
+		if m["id"] != a.id.String() || m["email"] != a.email || m["display_name"] != "Ann" || m["role"] != wantRole ||
+			m["description_style"] != "as_typed" {
 			t.Errorf("profile = %v", m)
 		}
 		if d := time.Since(parseTime(t, m["created_at"])); d < -time.Minute || d > time.Minute {
@@ -68,7 +81,7 @@ func TestUpdateMe(t *testing.T) {
 			if code != http.StatusOK {
 				t.Fatalf("PATCH %q: %d %v", c.in, code, m)
 			}
-			assertKeys(t, "profile", m, "id", "email", "display_name", "role", "created_at")
+			assertKeys(t, "profile", m, profileKeys...)
 			if m["display_name"] != c.want || m["id"] != a.id.String() || m["role"] != "user" {
 				t.Errorf("PATCH %q: %v, want display_name %q", c.in, m, c.want)
 			}
@@ -115,6 +128,80 @@ func TestUpdateMe(t *testing.T) {
 		if n := e.count("select count(*) from users u join profiles p on p.id = u.id "+
 			"where u.id = $1 and u.email = $2 and p.role = 'user' and p.display_name = 'Bea'", a.id, a.email); n != 1 {
 			t.Error("a refused PATCH changed the account")
+		}
+	})
+
+	t.Run("each description style is saved and returned", func(t *testing.T) {
+		for _, style := range []string{"clean_name", "light_tidy", "as_typed", "light_tidy"} {
+			code, m := patch(jsonBody(t, map[string]string{"description_style": style}))
+			if code != http.StatusOK {
+				t.Fatalf("PATCH %q: %d %v", style, code, m)
+			}
+			assertKeys(t, "profile", m, profileKeys...)
+			if m["description_style"] != style || m["display_name"] != "Bea" || m["id"] != a.id.String() {
+				t.Errorf("PATCH %q: %v", style, m)
+			}
+			if got := e.descriptionStyle(a); got != style {
+				t.Errorf("stored %q, want %q", got, style)
+			}
+		}
+	})
+
+	t.Run("an unknown, empty or wrongly typed style is invalid_input and changes nothing", func(t *testing.T) {
+		for _, body := range []string{
+			`{"description_style":"fancy"}`,
+			`{"description_style":"Clean_Name"}`,
+			`{"description_style":" as_typed"}`,
+			`{"description_style":""}`,
+			`{"description_style":5}`,
+			`{"description_style":true}`,
+			`{"description_style":["as_typed"]}`,
+		} {
+			code, m := patch(body)
+			if code != http.StatusBadRequest || m["error"] != "invalid_input" {
+				t.Errorf("PATCH %s: %d %v, want 400 invalid_input", body, code, m)
+			}
+		}
+		if got := e.descriptionStyle(a); got != "light_tidy" {
+			t.Errorf("stored %q, want light_tidy", got)
+		}
+	})
+
+	t.Run("a missing or null description_style leaves it", func(t *testing.T) {
+		for _, body := range []string{`{}`, `{"description_style":null}`, `{"display_name":"Bea"}`} {
+			code, m := patch(body)
+			if code != http.StatusOK || m["description_style"] != "light_tidy" {
+				t.Errorf("PATCH %s: %d %v", body, code, m)
+			}
+		}
+		if got := e.descriptionStyle(a); got != "light_tidy" {
+			t.Errorf("stored %q, want light_tidy", got)
+		}
+	})
+
+	t.Run("both fields in one request", func(t *testing.T) {
+		code, m := patch(`{"display_name":" Cat ","description_style":"clean_name"}`)
+		if code != http.StatusOK || m["display_name"] != "Cat" || m["description_style"] != "clean_name" {
+			t.Fatalf("PATCH both: %d %v", code, m)
+		}
+		if e.displayName(a) != "Cat" || e.descriptionStyle(a) != "clean_name" {
+			t.Errorf("stored %q, %q; want Cat, clean_name", e.displayName(a), e.descriptionStyle(a))
+		}
+	})
+
+	t.Run("a bad one of two fields changes neither", func(t *testing.T) {
+		for _, body := range []string{
+			`{"display_name":"Dan","description_style":"fancy"}`,
+			jsonBody(t, map[string]string{"display_name": strings.Repeat("ก", 51), "description_style": "as_typed"}),
+			`{"display_name":"Dan","description_style":5}`,
+		} {
+			code, m := patch(body)
+			if code != http.StatusBadRequest || m["error"] != "invalid_input" {
+				t.Errorf("PATCH %s: %d %v, want 400 invalid_input", body, code, m)
+			}
+		}
+		if e.displayName(a) != "Cat" || e.descriptionStyle(a) != "clean_name" {
+			t.Errorf("stored %q, %q; want Cat, clean_name", e.displayName(a), e.descriptionStyle(a))
 		}
 	})
 }
@@ -246,6 +333,21 @@ func TestMeCrossUser(t *testing.T) {
 		t.Errorf("B's display name = %q after A's PATCH", got)
 	}
 
+	e.exec("update profiles set description_style = 'light_tidy' where id = $1", b.id)
+	for _, style := range []string{"clean_name", "as_typed"} {
+		rec = e.do(http.MethodPatch, "/api/me", aTok, `{"description_style":"`+style+`"}`)
+		if m := decodeObject(t, rec); rec.Code != http.StatusOK || m["id"] != a.id.String() || m["description_style"] != style {
+			t.Errorf("A's PATCH of the style: %d %s", rec.Code, rec.Body.String())
+		}
+		if got := e.descriptionStyle(b); got != "light_tidy" {
+			t.Errorf("B's description style = %q after A's PATCH", got)
+		}
+	}
+	rec = e.do(http.MethodGet, "/api/me", bTok, "")
+	if m := decodeObject(t, rec); m["id"] != b.id.String() || m["description_style"] != "light_tidy" {
+		t.Errorf("B's GET after A's PATCH: %s", rec.Body.String())
+	}
+
 	if rec := e.deleteMe(aTok, b.password); rec.Code != http.StatusBadRequest {
 		t.Errorf("A's DELETE with B's password: %d, want 400", rec.Code)
 	}
@@ -257,7 +359,8 @@ func TestMeCrossUser(t *testing.T) {
 		t.Errorf("B's rows = %v, want %v", got, bRows)
 	}
 	rec = e.do(http.MethodGet, "/api/me", bTok, "")
-	if m := decodeObject(t, rec); rec.Code != http.StatusOK || m["id"] != b.id.String() || m["display_name"] != "Bea" {
+	if m := decodeObject(t, rec); rec.Code != http.StatusOK || m["id"] != b.id.String() || m["display_name"] != "Bea" ||
+		m["description_style"] != "light_tidy" {
 		t.Errorf("B's GET after A's delete: %d %s", rec.Code, rec.Body.String())
 	}
 	e.session(e.login(b.email, b.password))

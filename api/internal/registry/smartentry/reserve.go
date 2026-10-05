@@ -1,6 +1,7 @@
 package smartentry
 
 import (
+	accountgetdescriptionstyleport "github.com/tarlrsk/expense-tracker/api/internal/account/port/getdescriptionstyle"
 	categorieslistport "github.com/tarlrsk/expense-tracker/api/internal/categories/port/list"
 	"github.com/tarlrsk/expense-tracker/api/internal/registry"
 	smartentryreserveport "github.com/tarlrsk/expense-tracker/api/internal/smartentry/port/reserve"
@@ -12,7 +13,8 @@ import (
 func NewReserve(deps registry.Deps) smartentryreserveproc.Processor {
 	return smartentryreserveproc.New(deps.UserTx, deps.Clock, deps.Config.AppTimeZone, deps.Config.AI.DailyParseLimit,
 		smartentryreserveproc.Ports{
-			Usage:      smartentryreserveport.NewPG(),
-			Categories: categorieslistport.NewPG(),
+			Usage:            smartentryreserveport.NewPG(),
+			Categories:       categorieslistport.NewPG(),
+			DescriptionStyle: accountgetdescriptionstyleport.NewPG(),
 		})
 }

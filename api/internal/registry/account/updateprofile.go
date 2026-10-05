@@ -2,6 +2,7 @@ package account
 
 import (
 	accountgetprofileport "github.com/tarlrsk/expense-tracker/api/internal/account/port/getprofile"
+	accountupdatedescriptionstyleport "github.com/tarlrsk/expense-tracker/api/internal/account/port/updatedescriptionstyle"
 	accountupdatedisplaynameport "github.com/tarlrsk/expense-tracker/api/internal/account/port/updatedisplayname"
 	accountupdateprofileproc "github.com/tarlrsk/expense-tracker/api/internal/account/processor/updateprofile"
 	"github.com/tarlrsk/expense-tracker/api/internal/registry"
@@ -12,7 +13,8 @@ import (
 // the read-back as app_auth (ADR-0068).
 func NewUpdateProfile(deps registry.Deps, auth tx.Auth) accountupdateprofileproc.Processor {
 	return accountupdateprofileproc.New(deps.UserTx, auth, accountupdateprofileproc.Ports{
-		UpdateDisplayName: accountupdatedisplaynameport.NewPG(),
-		GetProfile:        accountgetprofileport.NewPG(),
+		UpdateDisplayName:      accountupdatedisplaynameport.NewPG(),
+		UpdateDescriptionStyle: accountupdatedescriptionstyleport.NewPG(),
+		GetProfile:             accountgetprofileport.NewPG(),
 	})
 }

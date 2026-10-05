@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	accountdomain "github.com/tarlrsk/expense-tracker/api/internal/account/domain"
 	categoriesdomain "github.com/tarlrsk/expense-tracker/api/internal/categories/domain"
 	transactionsdomain "github.com/tarlrsk/expense-tracker/api/internal/transactions/domain"
 	"github.com/tarlrsk/expense-tracker/api/internal/tx"
@@ -18,6 +19,7 @@ import (
 type (
 	usageFn func(ctx context.Context, ownerID uuid.UUID, day transactionsdomain.Date, limit int) (int, bool, error)
 	listFn  func(ctx context.Context, ownerID uuid.UUID) ([]categoriesdomain.Category, error)
+	styleFn func(ctx context.Context, userID uuid.UUID) (accountdomain.DescriptionStyle, bool, error)
 )
 
 func (f usageFn) Reserve(ctx context.Context, o uuid.UUID, d transactionsdomain.Date, l int) (int, bool, error) {
@@ -26,6 +28,10 @@ func (f usageFn) Reserve(ctx context.Context, o uuid.UUID, d transactionsdomain.
 
 func (f listFn) List(ctx context.Context, o uuid.UUID) ([]categoriesdomain.Category, error) {
 	return f(ctx, o)
+}
+
+func (f styleFn) Get(ctx context.Context, u uuid.UUID) (accountdomain.DescriptionStyle, bool, error) {
+	return f(ctx, u)
 }
 
 func TestExecute(t *testing.T) {
@@ -42,14 +48,26 @@ func TestExecute(t *testing.T) {
 		reserved  bool
 		usageErr  error
 		listErr   error
+		style     accountdomain.DescriptionStyle // "" means no profile row
+		styleErr  error
 		wantErr   error
 		wantCats  []uuid.UUID
+		wantStyle accountdomain.DescriptionStyle
 		wantCalls []string
 		wantTx    []txtest.Outcome
 	}{
 		{
-			name: "reserved: the active categories in the caller's order", reserved: true,
-			wantCats: []uuid.UUID{food, salary}, wantCalls: []string{"reserve", "list"}, wantTx: []txtest.Outcome{txtest.Committed},
+			name: "reserved: the active categories in the caller's order and the caller's style", reserved: true,
+			style: accountdomain.DescriptionStyleCleanName, wantStyle: accountdomain.DescriptionStyleCleanName,
+			wantCats: []uuid.UUID{food, salary}, wantCalls: []string{"reserve", "list", "style"}, wantTx: []txtest.Outcome{txtest.Committed},
+		},
+		{
+			name: "reserved, no profile row: the default style", reserved: true, wantStyle: accountdomain.DescriptionStyleAsTyped,
+			wantCats: []uuid.UUID{food, salary}, wantCalls: []string{"reserve", "list", "style"}, wantTx: []txtest.Outcome{txtest.Committed},
+		},
+		{
+			name: "the style read fails: the reservation is rolled back", reserved: true, styleErr: boom, wantErr: boom,
+			wantCalls: []string{"reserve", "list", "style"}, wantTx: []txtest.Outcome{txtest.RolledBack},
 		},
 		{name: "at the limit: nothing read", wantCalls: []string{"reserve"}, wantTx: []txtest.Outcome{txtest.Committed}},
 		{
@@ -89,6 +107,10 @@ func TestExecute(t *testing.T) {
 					call(ctx, "list", o)
 					return all, tt.listErr
 				}),
+				DescriptionStyle: styleFn(func(ctx context.Context, o uuid.UUID) (accountdomain.DescriptionStyle, bool, error) {
+					call(ctx, "style", o)
+					return tt.style, tt.style != "", tt.styleErr
+				}),
 			})
 			resp, err := p.Execute(t.Context(), Request{UserID: user})
 			if !errors.Is(err, tt.wantErr) || (err == nil) != (tt.wantErr == nil) {
@@ -99,9 +121,10 @@ func TestExecute(t *testing.T) {
 				for _, c := range resp.Categories {
 					cats = append(cats, c.ID)
 				}
-				if resp.Reserved != tt.reserved || !slices.Equal(cats, tt.wantCats) || resp.Day.String() != "2026-10-03" {
-					t.Errorf("response = reserved %v, day %s, categories %v; want %v, 2026-10-03, %v",
-						resp.Reserved, resp.Day, cats, tt.reserved, tt.wantCats)
+				if resp.Reserved != tt.reserved || !slices.Equal(cats, tt.wantCats) || resp.Day.String() != "2026-10-03" ||
+					resp.DescriptionStyle != tt.wantStyle {
+					t.Errorf("response = reserved %v, day %s, categories %v, style %q; want %v, 2026-10-03, %v, %q",
+						resp.Reserved, resp.Day, cats, resp.DescriptionStyle, tt.reserved, tt.wantCats, tt.wantStyle)
 				}
 			}
 			if !slices.Equal(calls, tt.wantCalls) {
