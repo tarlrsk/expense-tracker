@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -89,6 +90,7 @@ func (a *anthropicAdaptor) Parse(ctx context.Context, req Request) (Response, er
 	// (ADR-0043).
 	callCtx, cancel := context.WithTimeout(ctx, a.timeout)
 	defer cancel()
+	start := time.Now()
 	msg, err := a.client.Messages.New(callCtx, anthropic.MessageNewParams{
 		Model:     a.model,
 		MaxTokens: maxTokens,
@@ -101,6 +103,15 @@ func (a *anthropicAdaptor) Parse(ctx context.Context, req Request) (Response, er
 	if err != nil {
 		return Response{}, fmt.Errorf("ai parse: %w", callError(callCtx, err))
 	}
+	// What the call cost: counts and time only, never the lines, the answer or the key.
+	slog.Default().LogAttrs(ctx, slog.LevelInfo, "ai parse call",
+		slog.String("model", msg.Model),
+		slog.Int("lines", len(req.Lines)),
+		slog.Int64("input_tokens", msg.Usage.InputTokens),
+		slog.Int64("output_tokens", msg.Usage.OutputTokens),
+		slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+		slog.String("stop_reason", string(msg.StopReason)),
+	)
 
 	switch msg.StopReason {
 	case anthropic.StopReasonEndTurn:
