@@ -199,9 +199,9 @@ func TestAnthropicSendsRequest(t *testing.T) {
 	}
 	user := body.Messages[0].Content[0].Text
 	for _, want := range []string{
-		"Today: 2026-10-04 (Sunday)\n" +
-			"The days before today: 2026-10-03 Saturday, 2026-10-02 Friday, 2026-10-01 Thursday, 2026-09-30 Wednesday, " +
-			"2026-09-29 Tuesday, 2026-09-28 Monday, 2026-09-27 Sunday\n\n",
+		"Today: Sunday = 2026-10-04\nThe days before today, by weekday:\nlast Saturday = 2026-10-03\nlast Friday = 2026-10-02\n" +
+			"last Thursday = 2026-10-01\nlast Wednesday = 2026-09-30\nlast Tuesday = 2026-09-29\nlast Monday = 2026-09-28\n" +
+			"last Sunday = 2026-09-27\n\n",
 		`1. "อาหาร" (expense)`, `2. "Transport" (expense)`, `3. "Salary" (income)`,
 		"Description style: as typed",
 		"<note>\n" + `{"line":1,"text":"กาแฟ 60","date_if_none":"2026-10-04"}` + "\n" +
