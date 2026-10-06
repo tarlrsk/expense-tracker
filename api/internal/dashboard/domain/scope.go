@@ -1,6 +1,6 @@
 // Package domain holds the dashboard module's values (M6, ADR-0087, ADR-0088): whose data an
-// aggregation covers, the calendar month it covers, money totals and the results of the
-// dashboard queries.
+// aggregation covers, the calendar month it covers and the rule for the month parameter, money
+// totals and the results of the dashboard queries.
 package domain
 
 import "github.com/google/uuid"
