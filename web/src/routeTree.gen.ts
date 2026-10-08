@@ -15,6 +15,7 @@ import { Route as SetPasswordRouteImport } from './routes/set-password'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAddRouteImport } from './routes/_app/add'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
+import { Route as AppOverviewRouteImport } from './routes/_app/overview'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
 import { Route as AppSettingsAdminRouteImport } from './routes/_app/settings/admin'
 import { Route as AppSettingsCategoriesRouteImport } from './routes/_app/settings/categories'
@@ -48,6 +49,11 @@ const AppHistoryRoute = AppHistoryRouteImport.update({
   path: '/history',
   getParentRoute: () => AppRoute,
 } as any)
+const AppOverviewRoute = AppOverviewRouteImport.update({
+  id: '/overview',
+  path: '/overview',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   id: '/settings/',
   path: '/settings/',
@@ -70,6 +76,7 @@ export interface FileRoutesByFullPath {
   '/set-password': typeof SetPasswordRoute
   '/add': typeof AppAddRoute
   '/history': typeof AppHistoryRoute
+  '/overview': typeof AppOverviewRoute
   '/settings/admin': typeof AppSettingsAdminRoute
   '/settings/categories': typeof AppSettingsCategoriesRoute
   '/settings/': typeof AppSettingsIndexRoute
@@ -79,6 +86,7 @@ export interface FileRoutesByTo {
   '/set-password': typeof SetPasswordRoute
   '/add': typeof AppAddRoute
   '/history': typeof AppHistoryRoute
+  '/overview': typeof AppOverviewRoute
   '/': typeof AppIndexRoute
   '/settings/admin': typeof AppSettingsAdminRoute
   '/settings/categories': typeof AppSettingsCategoriesRoute
@@ -91,6 +99,7 @@ export interface FileRoutesById {
   '/set-password': typeof SetPasswordRoute
   '/_app/add': typeof AppAddRoute
   '/_app/history': typeof AppHistoryRoute
+  '/_app/overview': typeof AppOverviewRoute
   '/_app/': typeof AppIndexRoute
   '/_app/settings/admin': typeof AppSettingsAdminRoute
   '/_app/settings/categories': typeof AppSettingsCategoriesRoute
@@ -104,6 +113,7 @@ export interface FileRouteTypes {
     | '/set-password'
     | '/add'
     | '/history'
+    | '/overview'
     | '/settings/admin'
     | '/settings/categories'
     | '/settings/'
@@ -113,6 +123,7 @@ export interface FileRouteTypes {
     | '/set-password'
     | '/add'
     | '/history'
+    | '/overview'
     | '/'
     | '/settings/admin'
     | '/settings/categories'
@@ -124,6 +135,7 @@ export interface FileRouteTypes {
     | '/set-password'
     | '/_app/add'
     | '/_app/history'
+    | '/_app/overview'
     | '/_app/'
     | '/_app/settings/admin'
     | '/_app/settings/categories'
@@ -180,6 +192,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppHistoryRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/overview': {
+      id: '/_app/overview'
+      path: '/overview'
+      fullPath: '/overview'
+      preLoaderRoute: typeof AppOverviewRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/settings/': {
       id: '/_app/settings/'
       path: '/settings'
@@ -207,6 +226,7 @@ declare module '@tanstack/react-router' {
 interface AppRouteChildren {
   AppAddRoute: typeof AppAddRoute
   AppHistoryRoute: typeof AppHistoryRoute
+  AppOverviewRoute: typeof AppOverviewRoute
   AppIndexRoute: typeof AppIndexRoute
   AppSettingsAdminRoute: typeof AppSettingsAdminRoute
   AppSettingsCategoriesRoute: typeof AppSettingsCategoriesRoute
@@ -216,6 +236,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppAddRoute: AppAddRoute,
   AppHistoryRoute: AppHistoryRoute,
+  AppOverviewRoute: AppOverviewRoute,
   AppIndexRoute: AppIndexRoute,
   AppSettingsAdminRoute: AppSettingsAdminRoute,
   AppSettingsCategoriesRoute: AppSettingsCategoriesRoute,

@@ -30,7 +30,7 @@ import { apiFieldMessages, fieldOfApiError } from '@/lib/transaction-form'
 import type { FieldErrors, TransactionDraft, TransactionField } from '@/lib/transaction-form'
 import { common } from '@/messages/common'
 import { entry as t } from '@/messages/entry'
-import { categoriesQuery, transactionsKey } from '@/queries/money'
+import { categoriesQuery, invalidateCategories, invalidateTransactions } from '@/queries/money'
 
 /** One parse, shown in the sheet; a new `key` starts the sheet afresh. */
 export interface EntrySession {
@@ -229,7 +229,7 @@ export function ConfirmSheet({
   function finish(results: SaveResult[], before: number) {
     const savedIds = new Set(results.filter((r) => r.error === null).map((r) => r.id))
     if (savedIds.size > 0) {
-      void queryClient.invalidateQueries({ queryKey: transactionsKey })
+      void invalidateTransactions(queryClient)
     }
     const total = saved + savedIds.size
     // Remove is off while saving, so only saves have changed the list.
@@ -250,7 +250,7 @@ export function ConfirmSheet({
         firstFieldError ??= id
         if (field === 'category') {
           // The category may have been archived elsewhere; show the current list.
-          void queryClient.invalidateQueries({ queryKey: categoriesQuery.queryKey })
+          void invalidateCategories(queryClient)
         }
       } else {
         failed.set(id, { errors: {}, failure: errorText(error) })

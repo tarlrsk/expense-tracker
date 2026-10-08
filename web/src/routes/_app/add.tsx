@@ -24,7 +24,7 @@ import type { FieldErrors, TransactionDraft } from '@/lib/transaction-form'
 import { uuidv7 } from '@/lib/uuid'
 import { add as t } from '@/messages/add'
 import { entry } from '@/messages/entry'
-import { categoriesQuery, transactionsKey } from '@/queries/money'
+import { categoriesQuery, invalidateCategories, invalidateTransactions } from '@/queries/money'
 
 // Recording expenses and income. Two ways, one switch (ADR-0076): Quick, a typed text read by
 // POST /api/entry/parse and confirmed in a sheet; and Form, one transaction at a time
@@ -98,7 +98,7 @@ function ManualForm({ onNotice }: { onNotice: (text: string | null) => void }) {
   const save = useMutation({
     mutationFn: createTransaction,
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: transactionsKey })
+      void invalidateTransactions(queryClient)
       setDraft(emptyDraft(todayIn()))
       setId(uuidv7())
       setErrors({})
@@ -114,7 +114,7 @@ function ManualForm({ onNotice }: { onNotice: (text: string | null) => void }) {
       }
       if (field === 'category') {
         // The category may have been archived elsewhere; show the current list.
-        void queryClient.invalidateQueries({ queryKey: categoriesQuery.queryKey })
+        void invalidateCategories(queryClient)
       }
     },
   })

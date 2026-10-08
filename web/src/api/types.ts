@@ -241,3 +241,50 @@ export interface ParseEntryResponse {
   items: EntryItem[]
   ai: EntryAIStatus
 }
+
+// Dashboard (api/internal/handler/dashboard; ADR-0088, ADR-0089). Totals of one month, never
+// transaction rows; amounts are text such as "1450.00", and only `difference` may be negative.
+
+export interface DashboardTotals {
+  spent: string
+  income: string
+  /** Income minus spent. */
+  difference: string
+}
+
+/** One category with spending in the month; the list is largest first. */
+export interface DashboardCategory {
+  category_id: string
+  /** The category's current name and icon, also when it was renamed or archived later. */
+  name: string
+  /** An emoji, or empty when the category has none. */
+  icon: string
+  archived: boolean
+  total: string
+  /** The number of transactions behind `total`. */
+  count: number
+}
+
+/** One month of the trend: always six, oldest first, ending with the chosen month. */
+export interface DashboardTrendMonth {
+  /** YYYY-MM. */
+  month: string
+  spent: string
+}
+
+/** One of at most five descriptions with the most spending, largest first. */
+export interface DashboardDescription {
+  description: string
+  total: string
+  count: number
+}
+
+/** Body of GET /api/dashboard: a month without transactions is zeros and empty lists. */
+export interface Dashboard {
+  /** YYYY-MM. */
+  month: string
+  totals: DashboardTotals
+  categories: DashboardCategory[]
+  trend: DashboardTrendMonth[]
+  top_descriptions: DashboardDescription[]
+}

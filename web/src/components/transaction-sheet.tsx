@@ -29,7 +29,7 @@ import {
 import type { FieldErrors, TransactionDraft } from '@/lib/transaction-form'
 import { common } from '@/messages/common'
 import { transaction as t } from '@/messages/transaction'
-import { transactionsKey } from '@/queries/money'
+import { invalidateTransactions } from '@/queries/money'
 
 /**
  * One transaction from History, in a bottom sheet (ADR-0074): it shows the row already loaded
@@ -142,12 +142,12 @@ function EditForm({
   const save = useMutation({
     mutationFn: (changes: UpdateTransactionRequest) => updateTransaction(transaction.id, changes),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: transactionsKey })
+      void invalidateTransactions(queryClient)
       onDone(t.saved)
     },
     onError: (err) => {
       if (isApiError(err, 'not_found')) {
-        void queryClient.invalidateQueries({ queryKey: transactionsKey })
+        void invalidateTransactions(queryClient)
         return
       }
       if (isApiError(err, 'invalid_input')) {
@@ -228,12 +228,12 @@ function DeleteConfirm({
   const remove = useMutation({
     mutationFn: () => deleteTransaction(transaction.id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: transactionsKey })
+      void invalidateTransactions(queryClient)
       onDone(t.deleted)
     },
     onError: (err) => {
       if (isApiError(err, 'not_found')) {
-        void queryClient.invalidateQueries({ queryKey: transactionsKey })
+        void invalidateTransactions(queryClient)
       }
     },
   })

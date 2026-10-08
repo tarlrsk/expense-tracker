@@ -99,3 +99,12 @@ export function date(obj: JsonObject, key: string): string {
   }
   return value
 }
+
+/** A calendar month written YYYY-MM. */
+export function month(obj: JsonObject, key: string): string {
+  const value = string(obj, key)
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) {
+    throw new ResponseShapeError(`${key} is not a month`)
+  }
+  return value
+}

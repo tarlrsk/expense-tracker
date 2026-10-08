@@ -22,6 +22,7 @@
   --font-heading: var(--font-sans);
   --color-brass: var(--brass);
   --color-income: var(--income);
+  --color-chart-1: var(--chart-1);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -89,6 +90,8 @@
   --input: #86908c;
   --ring: var(--green);
   --income: var(--green);
+  /* Spending bars (ADR-0090): ink softened into paper; expenses stay ink, green stays income. */
+  --chart-1: #40514b;
   --radius: 0.625rem;
 }
 

@@ -1,0 +1,17 @@
+export const overview = {
+  title: 'Overview',
+  previous: 'Previous month',
+  next: 'Next month',
+  totals: 'Totals',
+  spent: 'Spent',
+  income: 'Income',
+  difference: 'Difference',
+  breakdown: 'Spending by category',
+  archived: 'Archived',
+  share: (percent: string) => `${percent} of spending`,
+  noSpending: 'No spending this month.',
+  empty: (month: string) => `Nothing recorded for ${month}.`,
+  emptyNote: 'What you add shows up here as totals and spending by category.',
+  toAdd: 'Add an expense or income',
+  loadError: 'Your overview could not be loaded.',
+} as const

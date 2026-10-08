@@ -26,7 +26,8 @@ import { errorText, isApiError } from '@/lib/errors'
 import { categories as t } from '@/messages/categories'
 import { common } from '@/messages/common'
 import { settings } from '@/messages/settings'
-import { categoriesQuery } from '@/queries/money'
+import { dashboardKey } from '@/queries/dashboard'
+import { categoriesQuery, invalidateCategories } from '@/queries/money'
 
 // The user's categories (ADR-0061, ADR-0069, ADR-0074): Expenses, Income and Archived. Add,
 // rename, change the icon, archive and unarchive open sheets; "Edit order" shows up and down
@@ -58,6 +59,8 @@ function CategoriesPage() {
     mutationFn: reorderCategories,
     onSuccess: (list) => {
       queryClient.setQueryData(categoriesQuery.queryKey, list)
+      // Dashboard rows of equal totals follow the category order (ADR-0088).
+      void queryClient.invalidateQueries({ queryKey: dashboardKey })
       setOrder(null)
       setNotice(t.orderSaved)
     },
@@ -65,7 +68,7 @@ function CategoriesPage() {
       if (isApiError(err, 'conflict')) {
         // The list changed elsewhere (ADR-0069): reload it and start again.
         setOrder(null)
-        void queryClient.invalidateQueries({ queryKey: categoriesQuery.queryKey })
+        void invalidateCategories(queryClient)
       }
     },
   })
@@ -74,7 +77,7 @@ function CategoriesPage() {
     setAddOpen(false)
     setEditOpen(false)
     setNotice(text)
-    void queryClient.invalidateQueries({ queryKey: categoriesQuery.queryKey })
+    void invalidateCategories(queryClient)
   }
 
   const all = categories.data?.categories ?? []

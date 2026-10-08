@@ -1,12 +1,14 @@
 import { Link } from '@tanstack/react-router'
 import { cn } from 'cn'
-import { PlusIcon, ReceiptTextIcon, SettingsIcon } from 'lucide-react'
+import { ChartColumnIcon, PlusIcon, ReceiptTextIcon, SettingsIcon } from 'lucide-react'
 
 import { nav } from '@/messages/nav'
 
-// The app's three places (ADR-0072): History, Add (the larger middle button), Settings. On a
-// phone the bar sits at the bottom, within thumb reach and clear of the home indicator; from
-// `md` up it is at the top of the same centred column. Shown only when logged in (_app route).
+// The app's four places (ADR-0072, ADR-0087): History, Overview, Add (the larger green button)
+// and Settings. On a phone the bar sits at the bottom, within thumb reach and clear of the home
+// indicator; from `md` up it is at the top of the same centred column. Add takes the width it
+// needs and the other three share the rest, so nothing is cut off at 320 px. Shown only when
+// logged in (_app route).
 
 const placeClass =
   'flex h-full min-h-11 flex-col items-center justify-center gap-1 rounded-xl text-sm text-muted-foreground select-none data-[status=active]:font-semibold data-[status=active]:text-primary md:flex-row md:gap-2 md:px-3 md:text-base'
@@ -17,14 +19,20 @@ export function AppBar() {
       aria-label={nav.label}
       className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] md:sticky md:top-0 md:bottom-auto md:border-t-0 md:border-b md:pt-[env(safe-area-inset-top)]"
     >
-      <ul className="mx-auto grid h-16 w-full max-w-xl grid-cols-3 items-center gap-2 px-2">
+      <ul className="mx-auto grid h-16 w-full max-w-xl grid-cols-[1fr_1fr_auto_1fr] items-center gap-1 px-2 md:gap-2">
         <li className="h-full py-1">
           <Link to="/history" className={placeClass}>
             <ReceiptTextIcon aria-hidden="true" className="size-6 md:size-5" />
             {nav.history}
           </Link>
         </li>
-        <li className="flex justify-center">
+        <li className="h-full py-1">
+          <Link to="/overview" className={placeClass}>
+            <ChartColumnIcon aria-hidden="true" className="size-6 md:size-5" />
+            {nav.overview}
+          </Link>
+        </li>
+        <li className="flex justify-center px-1">
           <Link
             to="/add"
             className={cn(
