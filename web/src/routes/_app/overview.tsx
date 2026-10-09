@@ -3,17 +3,24 @@ import { Link, createFileRoute } from '@tanstack/react-router'
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
 import { useId, useState } from 'react'
 
-import type { Dashboard, DashboardCategory, DashboardTotals } from '@/api/types'
+import type {
+  Dashboard,
+  DashboardCategory,
+  DashboardDescription,
+  DashboardTotals,
+} from '@/api/types'
 import { Amount } from '@/components/amount'
 import { CategoryIcon } from '@/components/category-icon'
 import { PageTitle } from '@/components/layout'
 import { FormAlert } from '@/components/messages'
+import { SpendingTrend } from '@/components/spending-trend'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   minTransactionDate,
   monthOf,
   monthParam,
+  monthPeriodOf,
   periodLabel,
   shiftPeriod,
   today as todayIn,
@@ -26,9 +33,10 @@ import { common } from '@/messages/common'
 import { overview as t } from '@/messages/overview'
 import { dashboardQuery } from '@/queries/dashboard'
 
-// One month's totals and spending by category (ADR-0087, ADR-0090), from one request to
-// GET /api/dashboard. The month is kept on the screen only and starts at this month; the arrows
-// stop at the months the API accepts: 2000-01 to one year after this month (ADR-0089).
+// One month's totals, spending by category, the six-month trend and the top descriptions
+// (ADR-0087, ADR-0090, ADR-0091), from one request to GET /api/dashboard. The month is kept on
+// the screen only and starts at this month; the arrows and the trend's columns stop at the months
+// the API accepts: 2000-01 to one year after this month (ADR-0089).
 export const Route = createFileRoute('/_app/overview')({
   component: OverviewPage,
 })
@@ -43,8 +51,16 @@ function OverviewPage() {
   const label = periodLabel(period)
   const previous = shiftPeriod(period, -1)
   const next = shiftPeriod(period, 1)
+  const lastMonth = monthParam(shiftPeriod(current, 12))
   const canGoPrevious = previous.from >= minTransactionDate
-  const canGoNext = monthParam(next) <= monthParam(shiftPeriod(current, 12))
+  const canGoNext = monthParam(next) <= lastMonth
+  const canPick = (m: string) => m >= monthParam(monthOf(minTransactionDate)) && m <= lastMonth
+  const pick = (m: string) => {
+    const picked = monthPeriodOf(m)
+    if (picked && canPick(m)) {
+      setPeriod(picked)
+    }
+  }
 
   return (
     <>
@@ -96,12 +112,24 @@ function OverviewPage() {
           </Button>
         </div>
       )}
-      {dashboard.isSuccess && <MonthOverview data={dashboard.data} label={label} />}
+      {dashboard.isSuccess && (
+        <MonthOverview data={dashboard.data} label={label} canPick={canPick} onPick={pick} />
+      )}
     </>
   )
 }
 
-function MonthOverview({ data, label }: { data: Dashboard; label: string }) {
+function MonthOverview({
+  data,
+  label,
+  canPick,
+  onPick,
+}: {
+  data: Dashboard
+  label: string
+  canPick: (month: string) => boolean
+  onPick: (month: string) => void
+}) {
   const { totals, categories } = data
   if (toSatang(totals.spent) === 0n && toSatang(totals.income) === 0n) {
     return (
@@ -121,6 +149,8 @@ function MonthOverview({ data, label }: { data: Dashboard; label: string }) {
     <div className="flex flex-col gap-8">
       <Totals totals={totals} />
       <Breakdown categories={categories} spent={totals.spent} />
+      <SpendingTrend trend={data.trend} month={data.month} canPick={canPick} onPick={onPick} />
+      <TopDescriptions rows={data.top_descriptions} spent={totals.spent} />
     </div>
   )
 }
@@ -232,6 +262,41 @@ function CategoryRow({
   )
 }
 
+function TopDescriptions({ rows, spent }: { rows: DashboardDescription[]; spent: string }) {
+  const headingId = useId()
+  return (
+    <section aria-labelledby={headingId} className="flex flex-col">
+      <h3
+        id={headingId}
+        className="border-b border-border pb-2 text-sm font-semibold text-muted-foreground"
+      >
+        {t.topDescriptions}
+      </h3>
+      {rows.length === 0 ? (
+        <p className="py-4 text-muted-foreground">
+          {toSatang(spent) === 0n ? t.noSpending : t.noDescriptions}
+        </p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-border">
+          {rows.map((row) => (
+            <li
+              key={row.description}
+              data-testid="description-row"
+              className="flex min-h-14 items-center justify-between gap-3 py-3"
+            >
+              <span className="flex min-w-0 flex-col">
+                <span className="break-words">{row.description}</span>
+                <span className="text-sm text-muted-foreground">{t.count(row.count)}</span>
+              </span>
+              <Amount value={row.total} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 function OverviewSkeleton() {
   return (
     <div aria-hidden="true" data-testid="overview-skeleton" className="flex flex-col gap-8">
@@ -260,6 +325,14 @@ function OverviewSkeleton() {
             </div>
           </div>
         ))}
+      </div>
+      <div className="flex flex-col">
+        <Skeleton className="mb-2 h-4 w-32" />
+        <div className="flex h-36 items-end gap-3 border-t border-border pt-4">
+          {[40, 65, 50, 80, 55, 100].map((height) => (
+            <Skeleton key={height} className="flex-1" style={{ height: `${String(height)}%` }} />
+          ))}
+        </div>
       </div>
     </div>
   )

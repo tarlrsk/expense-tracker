@@ -8,10 +8,12 @@ import {
   maxTransactionDate,
   monthOf,
   monthParam,
+  monthPeriodOf,
   periodContains,
   periodLabel,
   periodOf,
   shiftPeriod,
+  shortMonthLabel,
   today,
   weekOf,
 } from './dates'
@@ -92,6 +94,35 @@ describe('monthOf', () => {
 
   it('gives the month filter', () => {
     expect(monthParam(monthOf('2026-10-04'))).toBe('2026-10')
+  })
+})
+
+describe('monthPeriodOf', () => {
+  it('gives the month of a YYYY-MM', () => {
+    expect(monthPeriodOf('2026-02')).toEqual({
+      view: 'month',
+      from: '2026-02-01',
+      to: '2026-02-28',
+    })
+    expect(monthPeriodOf('1999-12')).toEqual({
+      view: 'month',
+      from: '1999-12-01',
+      to: '1999-12-31',
+    })
+  })
+
+  it.each(['2026-13', '2026-00', '2026-1', '2026-10-01', '', 'October'])('rejects %j', (month) => {
+    expect(monthPeriodOf(month)).toBeNull()
+  })
+})
+
+describe('shortMonthLabel', () => {
+  it.each([
+    { month: '2026-10', label: 'Oct' },
+    { month: '2027-01', label: 'Jan' },
+    { month: '2026-09', label: 'Sept' },
+  ])('$month', ({ month, label }) => {
+    expect(shortMonthLabel(month)).toBe(label)
   })
 })
 

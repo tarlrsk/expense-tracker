@@ -118,6 +118,12 @@ export function monthParam(period: Period): string {
   return period.from.slice(0, 7)
 }
 
+/** The calendar month written YYYY-MM, such as a dashboard month; null when it is not one. */
+export function monthPeriodOf(month: string): Period | null {
+  const first = `${month}-01`
+  return /^\d{4}-\d{2}$/.test(month) && utcOf(first) ? monthOf(first) : null
+}
+
 // Calendar days are formatted at their UTC midnight, so the label is the day itself. en-GB puts
 // the day before the month, as Thailand does.
 const dayMonthYear = new Intl.DateTimeFormat('en-GB', {
@@ -136,6 +142,7 @@ const monthYear = new Intl.DateTimeFormat('en-GB', {
   month: 'long',
   year: 'numeric',
 })
+const shortMonth = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', month: 'short' })
 const weekdayDayMonth = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'UTC',
   weekday: 'short',
@@ -174,4 +181,9 @@ export function dayLabel(date: string): string {
 /** A day written in full, for one transaction: "Sat 3 Oct 2026". */
 export function longDayLabel(date: string): string {
   return weekdayDayMonthYear.format(utc(date)).replace(',', '')
+}
+
+/** A month written YYYY-MM, short, for a column of the Overview trend: "Oct". */
+export function shortMonthLabel(month: string): string {
+  return shortMonth.format(utc(`${month}-01`))
 }

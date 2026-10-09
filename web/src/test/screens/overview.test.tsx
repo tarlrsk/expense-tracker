@@ -11,6 +11,8 @@ function dashboard(
     month: string
     totals: { spent: string; income: string; difference: string }
     categories: unknown[]
+    trend: { month: string; spent: string }[]
+    top_descriptions: { description: string; total: string; count: number }[]
   }> = {},
 ) {
   const month = fields.month ?? '2026-10'
@@ -18,17 +20,20 @@ function dashboard(
     month,
     totals: { spent: '0.00', income: '0.00', difference: '0.00' },
     categories: [],
-    trend: [
-      { month: '2026-05', spent: '0.00' },
-      { month: '2026-06', spent: '0.00' },
-      { month: '2026-07', spent: '0.00' },
-      { month: '2026-08', spent: '0.00' },
-      { month: '2026-09', spent: '0.00' },
-      { month, spent: '0.00' },
-    ],
+    trend: trendOf(month, ['0.00', '0.00', '0.00', '0.00', '0.00', '0.00']),
     top_descriptions: [],
     ...fields,
   }
+}
+
+/** Six trend months ending with `month`, oldest first, with these amounts spent. */
+function trendOf(month: string, spent: string[]) {
+  const [y = 0, m = 0] = month.split('-').map(Number)
+  return spent.map((amount, i) => {
+    const t = new Date(Date.UTC(y, m - 1 - (spent.length - 1 - i), 1))
+    const text = `${String(t.getUTCFullYear()).padStart(4, '0')}-${String(t.getUTCMonth() + 1).padStart(2, '0')}`
+    return { month: text, spent: amount }
+  })
 }
 
 function row(n: number, name: string, icon: string, total: string, archived = false) {
@@ -48,6 +53,11 @@ const october = dashboard({
     row(1, 'Food', '🍜', '3000.00'),
     row(2, 'Transport', '🚌', '985.00'),
     row(3, 'Old hobby', '', '15.00', true),
+  ],
+  trend: trendOf('2026-10', ['3200.00', '0.00', '5100.50', '2750.00', '4410.00', '4000.00']),
+  top_descriptions: [
+    { description: 'Grab', total: '985.00', count: 7 },
+    { description: 'ร้านข้าวมันไก่ป้าศรี', total: '420.00', count: 1 },
   ],
 })
 
@@ -79,6 +89,14 @@ function months(): (string | null)[] {
 
 async function breakdown() {
   return screen.findByRole('region', { name: 'Spending by category' })
+}
+
+async function trend() {
+  return screen.findByRole('region', { name: 'Last six months' })
+}
+
+async function topDescriptions() {
+  return screen.findByRole('region', { name: 'Top descriptions' })
 }
 
 describe('Overview', () => {
@@ -161,6 +179,8 @@ describe('Overview', () => {
     expect(within(region).getByText('No spending this month.')).toBeInTheDocument()
     expect(screen.getByTestId('total-spent')).toHaveTextContent('0.00')
     expect(screen.getByTestId('total-income')).toHaveTextContent('+30,000.00')
+    expect(await trend()).toBeInTheDocument()
+    expect(within(await topDescriptions()).getByText('No spending this month.')).toBeInTheDocument()
   })
 
   it('has an empty state with a way to Add for a month without transactions', async () => {
@@ -173,6 +193,77 @@ describe('Overview', () => {
       '/add',
     )
     expect(screen.queryByRole('region', { name: 'Spending by category' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Last six months' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Top descriptions' })).toBeNull()
+  })
+
+  it('shows six months of spending, the chosen month last with its amount written in full', async () => {
+    openOverview()
+
+    const region = await trend()
+    expect(within(region).getByTestId('trend-chosen')).toHaveTextContent('October 20264,000.00')
+    const columns = within(region).getAllByTestId('trend-month')
+    expect(columns.map((c) => c.textContent)).toEqual(['May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct'])
+    expect(columns.map((c) => c.getAttribute('aria-label'))).toEqual([
+      'May 2026: 3,200.00 spent',
+      'June 2026: 0.00 spent',
+      'July 2026: 5,100.50 spent',
+      'August 2026: 2,750.00 spent',
+      'September 2026: 4,410.00 spent',
+      'October 2026: 4,000.00 spent',
+    ])
+    expect(columns[5]).toHaveAttribute('aria-current', 'date')
+    expect(columns[4]).not.toHaveAttribute('aria-current')
+  })
+
+  it('moves to a month when its column is tapped', async () => {
+    const { user } = openOverview()
+    const region = await trend()
+
+    await user.click(within(region).getByRole('button', { name: 'July 2026: 5,100.50 spent' }))
+    expect(await screen.findByRole('heading', { name: 'July 2026' })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(months()).toEqual(['2026-10', '2026-07'])
+    })
+  })
+
+  it('cannot move to a trend month before January 2000', async () => {
+    vi.setSystemTime(new Date('2000-02-15T05:00:00Z'))
+    body = dashboard({
+      month: '2000-02',
+      totals: { spent: '10.00', income: '0.00', difference: '-10.00' },
+      categories: [row(1, 'Food', '🍜', '10.00')],
+      trend: trendOf('2000-02', ['0.00', '0.00', '0.00', '0.00', '5.00', '10.00']),
+    })
+    const { user } = openOverview()
+
+    const columns = within(await trend()).getAllByTestId('trend-month')
+    expect(columns.slice(0, 4).every((c) => (c as HTMLButtonElement).disabled)).toBe(true)
+    expect(columns[4]).toBeEnabled()
+    await user.click(columns[4])
+    expect(await screen.findByRole('heading', { name: 'January 2000' })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(months()).toEqual(['2000-02', '2000-01'])
+    })
+  })
+
+  it('lists the top descriptions with their number of transactions and total', async () => {
+    openOverview()
+
+    const rows = within(await topDescriptions()).getAllByTestId('description-row')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toHaveTextContent('Grab7 transactions985.00')
+    expect(rows[1]).toHaveTextContent('ร้านข้าวมันไก่ป้าศรี1 transaction420.00')
+  })
+
+  it('says so when no spending has a description', async () => {
+    body = { ...october, top_descriptions: [] }
+    openOverview()
+
+    const region = await topDescriptions()
+    expect(
+      within(region).getByText('No spending with a description this month.'),
+    ).toBeInTheDocument()
   })
 
   it('moves between months with the arrows', async () => {
