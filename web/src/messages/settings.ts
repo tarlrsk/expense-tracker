@@ -39,6 +39,19 @@ export const settings = {
     clean_name: { label: 'Clean name', example: 'Café Amazon' },
   },
 
+  exportData: 'Export data',
+  exportDataHint: 'A CSV file for Excel or Google Sheets',
+  exportTitle: 'Export data',
+  exportIntro:
+    'Download your transactions as a CSV file. It opens in Excel and Google Sheets, Thai text included.',
+  exportAllTime: 'All time',
+  exportAllTimeHint: 'Every transaction you have recorded',
+  exportThisMonth: 'This month',
+  exportPreparing: 'Preparing your file…',
+  exportStarted: (fileName: string) => `Downloading ${fileName}.`,
+  exportStartedEmpty: (fileName: string) =>
+    `Downloading ${fileName}. It is empty: there are no transactions in that period.`,
+
   deleteTitle: 'Delete your account?',
   deleteWarning:
     'This permanently deletes your account and all your data: every expense, income and category. It cannot be undone.',

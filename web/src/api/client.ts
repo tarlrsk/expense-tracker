@@ -84,9 +84,73 @@ const basePath = '/api'
  * is passed through unchanged.
  */
 export async function apiRequest<T>(path: string, options: RequestOptions<T> = {}): Promise<T> {
-  const { method = 'GET', body, signal, auth = true, parse } = options
+  const { parse, ...rest } = options
+  const response = await send(path, 'application/json', rest)
+  if (response.status === 204) {
+    return undefined as T
+  }
 
-  const headers = new Headers({ Accept: 'application/json' })
+  let parsed: unknown
+  try {
+    parsed = await response.json()
+  } catch (err) {
+    if (isAbortError(err)) {
+      throw err
+    }
+    throw badResponse(response.status, err)
+  }
+  if (!parse) {
+    return parsed as T
+  }
+  try {
+    return parse(parsed)
+  } catch (err) {
+    if (err instanceof ResponseShapeError) {
+      throw badResponse(response.status, err)
+    }
+    throw err
+  }
+}
+
+/** A file sent by the API, with the name it suggests (null when it suggests none). */
+export interface DownloadedFile {
+  blob: Blob
+  fileName: string | null
+}
+
+/**
+ * Calls `/api{path}` for a file to download, such as the CSV export: the same bearer token and
+ * errors as apiRequest (an error is still JSON), but a success is returned as a Blob with the
+ * name from `Content-Disposition`. The browser never follows a link to the API, so no cookie is
+ * ever needed (ADR-0016).
+ */
+export async function apiDownload(
+  path: string,
+  accept: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<DownloadedFile> {
+  const response = await send(path, `${accept}, application/json`, options)
+  let blob: Blob
+  try {
+    blob = await response.blob()
+  } catch (err) {
+    if (isAbortError(err)) {
+      throw err
+    }
+    throw badResponse(response.status, err)
+  }
+  return { blob, fileName: fileNameOf(response.headers.get('Content-Disposition')) }
+}
+
+/** Sends the request and returns a successful response; any failure becomes an ApiError. */
+async function send(
+  path: string,
+  accept: string,
+  options: Omit<RequestOptions, 'parse'>,
+): Promise<Response> {
+  const { method = 'GET', body, signal, auth = true } = options
+
+  const headers = new Headers({ Accept: accept })
   const token = auth ? tokenProvider() : null
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
@@ -114,30 +178,21 @@ export async function apiRequest<T>(path: string, options: RequestOptions<T> = {
     }
     throw err
   }
-  if (response.status === 204) {
-    return undefined as T
-  }
+  return response
+}
 
-  let parsed: unknown
-  try {
-    parsed = await response.json()
-  } catch (err) {
-    if (isAbortError(err)) {
-      throw err
-    }
-    throw badResponse(response.status, err)
+/**
+ * The file name in a `Content-Disposition` header such as `attachment; filename="a.csv"`; null
+ * when there is none. Only the plain `filename` form is read: the API sends nothing else, and a
+ * name with a path in it is refused.
+ */
+export function fileNameOf(header: string | null): string | null {
+  if (!header) {
+    return null
   }
-  if (!parse) {
-    return parsed as T
-  }
-  try {
-    return parse(parsed)
-  } catch (err) {
-    if (err instanceof ResponseShapeError) {
-      throw badResponse(response.status, err)
-    }
-    throw err
-  }
+  const match = /;\s*filename\s*=\s*(?:"([^"]*)"|([^\s;]+))/i.exec(header)
+  const name = match?.[1] ?? match?.[2] ?? ''
+  return name === '' || /[/\\]/.test(name) ? null : name
 }
 
 async function errorFromResponse(response: Response): Promise<ApiError> {

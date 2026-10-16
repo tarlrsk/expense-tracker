@@ -3,6 +3,7 @@ import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import {
   CheckIcon,
   ChevronRightIcon,
+  DownloadIcon,
   KeyRoundIcon,
   SparklesIcon,
   TagsIcon,
@@ -11,9 +12,10 @@ import {
 import { useId, useState } from 'react'
 import type { SubmitEvent } from 'react'
 
+import { getTransactionsCsv } from '@/api/export'
 import { changePassword, deleteMe, updateMe } from '@/api/me'
 import { descriptionStyles } from '@/api/types'
-import type { DescriptionStyle, Profile } from '@/api/types'
+import type { DescriptionStyle, ExportFile, ExportPeriod, Profile } from '@/api/types'
 import { FormSheet, PageTitle } from '@/components/layout'
 import { FormAlert, Notice } from '@/components/messages'
 import { TextField } from '@/components/text-field'
@@ -28,6 +30,8 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
+import { monthOf, periodLabel, today } from '@/lib/dates'
+import { saveFile } from '@/lib/download'
 import { errorText, isApiError } from '@/lib/errors'
 import { characterCount, passwordRuleError } from '@/lib/password'
 import { common } from '@/messages/common'
@@ -98,6 +102,7 @@ function SettingsContent({
   const [changeOpen, setChangeOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [styleOpen, setStyleOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
   // A new key for each opening, so a sheet's form always starts empty.
   const [sheetKey, setSheetKey] = useState(0)
   const queryClient = useQueryClient()
@@ -145,6 +150,24 @@ function SettingsContent({
               <span className="text-sm text-muted-foreground">
                 {t.descriptionStyles[profile.description_style].label}
               </span>
+            </span>
+            <ChevronRightIcon aria-hidden="true" className="size-5 text-muted-foreground" />
+          </button>
+        </li>
+        <li>
+          <button
+            type="button"
+            className="flex min-h-14 w-full items-center gap-3 py-3 text-left text-base select-none"
+            onClick={() => {
+              onNotice(null)
+              setSheetKey((k) => k + 1)
+              setExportOpen(true)
+            }}
+          >
+            <DownloadIcon aria-hidden="true" className="size-5 text-muted-foreground" />
+            <span className="flex flex-1 flex-col">
+              <span>{t.exportData}</span>
+              <span className="text-sm text-muted-foreground">{t.exportDataHint}</span>
             </span>
             <ChevronRightIcon aria-hidden="true" className="size-5 text-muted-foreground" />
           </button>
@@ -214,6 +237,17 @@ function SettingsContent({
         onSaved={() => {
           setStyleOpen(false)
           onNotice(t.descriptionStyleSaved)
+        }}
+      />
+      <ExportSheet
+        key={`export-${String(sheetKey)}`}
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        onExported={(file) => {
+          setExportOpen(false)
+          onNotice(
+            file.empty ? t.exportStartedEmpty(file.fileName) : t.exportStarted(file.fileName),
+          )
         }}
       />
       <ChangePasswordSheet
@@ -441,6 +475,98 @@ function DescriptionStyleSheet({
               )
             })}
           </fieldset>
+          {mutation.isError && <FormAlert>{errorText(mutation.error)}</FormAlert>}
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+type ExportChoice = 'all' | 'month'
+
+/**
+ * Exporting the caller's transactions as CSV (ADR-0087, ADR-0093): a tap on "All time" or "This
+ * month" fetches the file with the bearer token and hands it to the browser to save. "This month"
+ * is the month of today in the app time zone (ADR-0042). On an error the sheet stays open.
+ */
+function ExportSheet({
+  open,
+  onOpenChange,
+  onExported,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onExported: (file: ExportFile) => void
+}) {
+  const [choice, setChoice] = useState<ExportChoice | null>(null)
+  const id = useId()
+  const thisMonth = monthOf(today())
+
+  const mutation = useMutation({
+    mutationFn: (period: ExportPeriod) => getTransactionsCsv(period),
+    onSuccess: (file) => {
+      saveFile(file.blob, file.fileName)
+      onExported(file)
+    },
+    onSettled: () => {
+      setChoice(null)
+    },
+  })
+
+  function start(next: ExportChoice) {
+    if (mutation.isPending) {
+      return
+    }
+    setChoice(next)
+    mutation.mutate(next === 'all' ? {} : { from: thisMonth.from, to: thisMonth.to })
+  }
+
+  const options: { value: ExportChoice; label: string; hint: string }[] = [
+    { value: 'all', label: t.exportAllTime, hint: t.exportAllTimeHint },
+    { value: 'month', label: t.exportThisMonth, hint: periodLabel(thisMonth) },
+  ]
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent>
+        <div className="flex flex-col gap-6">
+          <SheetHeader>
+            <SheetTitle>{t.exportTitle}</SheetTitle>
+            <SheetDescription>{t.exportIntro}</SheetDescription>
+          </SheetHeader>
+          <div aria-busy={mutation.isPending} className="flex min-w-0 flex-col gap-2">
+            {options.map((option) => {
+              const busy = mutation.isPending && choice === option.value
+              return (
+                <Button
+                  key={option.value}
+                  variant="outline"
+                  size="lg"
+                  disabled={mutation.isPending}
+                  focusableWhenDisabled
+                  aria-labelledby={`${id}-${option.value}-label`}
+                  aria-describedby={`${id}-${option.value}-hint`}
+                  onClick={() => {
+                    start(option.value)
+                  }}
+                  className="h-auto min-h-14 justify-start gap-3 rounded-xl px-4 py-3 text-left whitespace-normal"
+                >
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span id={`${id}-${option.value}-label`} className="text-base">
+                      {option.label}
+                    </span>
+                    <span
+                      id={`${id}-${option.value}-hint`}
+                      className="text-sm font-normal text-muted-foreground"
+                    >
+                      {busy ? t.exportPreparing : option.hint}
+                    </span>
+                  </span>
+                  <DownloadIcon aria-hidden="true" className="size-5 shrink-0 text-primary" />
+                </Button>
+              )
+            })}
+          </div>
           {mutation.isError && <FormAlert>{errorText(mutation.error)}</FormAlert>}
         </div>
       </SheetContent>

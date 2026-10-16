@@ -1,15 +1,32 @@
 import { screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { monthOf, periodLabel, today } from '@/lib/dates'
+import { saveFile } from '@/lib/download'
 import { getToken } from '@/session/token'
 import { apiError, json, mockApi, noContent, operatorProfile, profile } from '@/test/api'
 import { renderApp } from '@/test/render'
+
+vi.mock('@/lib/download', () => ({ saveFile: vi.fn() }))
 
 let api: ReturnType<typeof mockApi>
 
 beforeEach(() => {
   api = mockApi({ 'GET /api/me': () => json(200, profile) })
+  vi.mocked(saveFile).mockClear()
 })
+
+const csvHeader = '\uFEFFDate,Amount,Kind,Category,Description,Note,Source\r\n'
+
+function csv(body: string, fileName: string): Response {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+    },
+  })
+}
 
 function openSettings() {
   return renderApp('/settings', { token: 'tok' })
@@ -157,6 +174,129 @@ describe('Settings', () => {
     })
     expect(api.callsTo('PATCH /api/me')).toHaveLength(0)
     expect(screen.queryByText('Description style saved.')).toBeNull()
+  })
+
+  it('exports all time at once, saves the file and closes the sheet', async () => {
+    api.on('GET /api/export.csv', () =>
+      csv(`${csvHeader}2026-10-01,145.00,expense,Food,Grab,,manual\r\n`, 'satang-transactions.csv'),
+    )
+    const { user } = openSettings()
+
+    const row = await screen.findByRole('button', { name: /Export data/ })
+    expect(row).toHaveTextContent('A CSV file for Excel or Google Sheets')
+    await user.click(row)
+    const sheet = await screen.findByRole('dialog', { name: 'Export data' })
+    expect(sheet).toHaveTextContent(/opens in Excel and Google Sheets/)
+    const allTime = within(sheet).getByRole('button', { name: 'All time' })
+    expect(allTime).toHaveAccessibleDescription('Every transaction you have recorded')
+    await user.click(allTime)
+
+    expect(await screen.findByText('Downloading satang-transactions.csv.')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+    const call = api.onlyCall('GET /api/export.csv')
+    expect([...call.query.keys()]).toEqual([])
+    expect(call.headers.get('Authorization')).toBe('Bearer tok')
+    expect(saveFile).toHaveBeenCalledOnce()
+    const [blob, name] = vi.mocked(saveFile).mock.calls[0]
+    expect(name).toBe('satang-transactions.csv')
+    expect(await blob.text()).toContain('2026-10-01,145.00')
+  })
+
+  it('exports this month in Bangkok time, with the month on the option', async () => {
+    const month = monthOf(today())
+    const name = `satang-transactions-${month.from}-to-${month.to}.csv`
+    api.on('GET /api/export.csv', () =>
+      csv(`${csvHeader}${month.from},60.00,expense,Food,Coffee,,text\r\n`, name),
+    )
+    const { user } = openSettings()
+
+    await user.click(await screen.findByRole('button', { name: /Export data/ }))
+    const sheet = await screen.findByRole('dialog', { name: 'Export data' })
+    const thisMonth = within(sheet).getByRole('button', { name: 'This month' })
+    expect(thisMonth).toHaveAccessibleDescription(periodLabel(month))
+    await user.click(thisMonth)
+
+    expect(await screen.findByText(`Downloading ${name}.`)).toBeInTheDocument()
+    const call = api.onlyCall('GET /api/export.csv')
+    expect(call.query.get('from')).toBe(month.from)
+    expect(call.query.get('to')).toBe(month.to)
+    expect(saveFile).toHaveBeenCalledWith(expect.any(Blob), name)
+  })
+
+  it('still saves an empty file and says it is empty', async () => {
+    api.on('GET /api/export.csv', () => csv(csvHeader, 'satang-transactions.csv'))
+    const { user } = openSettings()
+
+    await user.click(await screen.findByRole('button', { name: /Export data/ }))
+    const sheet = await screen.findByRole('dialog', { name: 'Export data' })
+    await user.click(within(sheet).getByRole('button', { name: 'All time' }))
+
+    expect(
+      await screen.findByText(
+        'Downloading satang-transactions.csv. It is empty: there are no transactions in that period.',
+      ),
+    ).toBeInTheDocument()
+    expect(saveFile).toHaveBeenCalledOnce()
+  })
+
+  it('disables both options and says it is preparing while the file loads', async () => {
+    let answer: (r: Response) => void = () => undefined
+    api.on(
+      'GET /api/export.csv',
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve
+        }),
+    )
+    const { user } = openSettings()
+
+    await user.click(await screen.findByRole('button', { name: /Export data/ }))
+    const sheet = await screen.findByRole('dialog', { name: 'Export data' })
+    await user.click(within(sheet).getByRole('button', { name: 'This month' }))
+
+    const thisMonth = within(sheet).getByRole('button', { name: 'This month' })
+    await waitFor(() => {
+      expect(thisMonth).toHaveAccessibleDescription('Preparing your file…')
+    })
+    expect(thisMonth).toHaveAttribute('aria-disabled', 'true')
+    expect(within(sheet).getByRole('button', { name: 'All time' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    await user.click(within(sheet).getByRole('button', { name: 'All time' }))
+    expect(api.callsTo('GET /api/export.csv')).toHaveLength(1)
+    answer(csv(csvHeader, 'satang-transactions.csv'))
+
+    expect(await screen.findByText(/Downloading satang-transactions.csv/)).toBeInTheDocument()
+  })
+
+  it('keeps the sheet open with the error and lets the user try again', async () => {
+    api.on('GET /api/export.csv', () => apiError(500, 'internal', 'something went wrong'))
+    const { user } = openSettings()
+
+    await user.click(await screen.findByRole('button', { name: /Export data/ }))
+    const sheet = await screen.findByRole('dialog', { name: 'Export data' })
+    await user.click(within(sheet).getByRole('button', { name: 'All time' }))
+
+    expect(await within(sheet).findByRole('alert')).toHaveTextContent(
+      'Something went wrong on the server. Try again in a moment.',
+    )
+    expect(saveFile).not.toHaveBeenCalled()
+    expect(within(sheet).getByRole('button', { name: 'All time' })).not.toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    expect(within(sheet).getByRole('button', { name: 'All time' })).toHaveAccessibleDescription(
+      'Every transaction you have recorded',
+    )
+
+    api.on('GET /api/export.csv', () => csv(csvHeader, 'satang-transactions.csv'))
+    await user.click(within(sheet).getByRole('button', { name: 'All time' }))
+
+    expect(await screen.findByText(/Downloading satang-transactions.csv/)).toBeInTheDocument()
+    expect(saveFile).toHaveBeenCalledOnce()
   })
 
   it('changes the password and says other devices were logged out', async () => {

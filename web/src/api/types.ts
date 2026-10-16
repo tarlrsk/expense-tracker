@@ -288,3 +288,19 @@ export interface Dashboard {
   trend: DashboardTrendMonth[]
   top_descriptions: DashboardDescription[]
 }
+
+// Export (api/internal/handler/export; ADR-0092). The caller's transactions as a CSV file.
+
+/** The period of GET /api/export.csv: dates YYYY-MM-DD, inclusive; none means every date. */
+export interface ExportPeriod {
+  from?: string
+  to?: string
+}
+
+/** A CSV file from GET /api/export.csv, ready to save. */
+export interface ExportFile {
+  blob: Blob
+  fileName: string
+  /** True when the file has only its header row: the period has no transactions. */
+  empty: boolean
+}

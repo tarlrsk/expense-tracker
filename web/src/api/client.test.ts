@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError,
   ResponseShapeError,
+  apiDownload,
   apiRequest,
+  fileNameOf,
   serverErrorCodes,
   setTokenProvider,
   setUnauthenticatedHandler,
@@ -292,5 +294,81 @@ describe('response parsing', () => {
 
     expect(err.code).toBe<ApiErrorCode>('bad_response')
     expect(err.status).toBe(201)
+  })
+})
+
+describe('apiDownload', () => {
+  it('sends the bearer token without cookies and returns the file and its name', async () => {
+    setTokenProvider(() => 'tok-123')
+    fetchMock.mockResolvedValue(
+      new Response('Date,Amount\r\n', {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': 'attachment; filename="satang-transactions.csv"',
+        },
+      }),
+    )
+
+    const file = await apiDownload('/export.csv', 'text/csv')
+
+    expect(await file.blob.text()).toBe('Date,Amount\r\n')
+    expect(file.fileName).toBe('satang-transactions.csv')
+    const { url, init, headers } = lastCall()
+    expect(url).toBe('/api/export.csv')
+    expect(init.method).toBe('GET')
+    expect(init.credentials).toBe('omit')
+    expect(headers.get('Authorization')).toBe('Bearer tok-123')
+    expect(headers.get('Accept')).toBe('text/csv, application/json')
+  })
+
+  it('reads an error as JSON like any call', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(400, { error: { code: 'invalid_input', message: 'from is not a date' } }),
+    )
+
+    const err = await catchApiError(apiDownload('/export.csv?from=x', 'text/csv'))
+
+    expect(err.status).toBe(400)
+    expect(err.code).toBe('invalid_input')
+    expect(err.message).toBe('from is not a date')
+  })
+
+  it('ends the session on 401 unauthenticated', async () => {
+    const onUnauthenticated = vi.fn()
+    setUnauthenticatedHandler(onUnauthenticated)
+    fetchMock.mockResolvedValue(
+      jsonResponse(401, { error: { code: 'unauthenticated', message: 'log in again' } }),
+    )
+
+    const err = await catchApiError(apiDownload('/export.csv', 'text/csv'))
+
+    expect(err.code).toBe('unauthenticated')
+    expect(onUnauthenticated).toHaveBeenCalledOnce()
+  })
+
+  it('maps a rejected fetch to network', async () => {
+    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'))
+
+    const err = await catchApiError(apiDownload('/export.csv', 'text/csv'))
+
+    expect(err.code).toBe('network')
+    expect(err.status).toBe(0)
+  })
+})
+
+describe('fileNameOf', () => {
+  it.each([
+    { header: 'attachment; filename="a.csv"', want: 'a.csv' },
+    { header: 'attachment; filename=a.csv', want: 'a.csv' },
+    { header: 'attachment;filename="a b.csv"', want: 'a b.csv' },
+    { header: 'Attachment; FILENAME="a.csv"', want: 'a.csv' },
+    { header: 'attachment', want: null },
+    { header: 'attachment; filename=""', want: null },
+    { header: 'attachment; filename="../a.csv"', want: null },
+    { header: 'attachment; filename="a\\b.csv"', want: null },
+    { header: null, want: null },
+  ])('reads $header as $want', ({ header, want }) => {
+    expect(fileNameOf(header)).toBe(want)
   })
 })
